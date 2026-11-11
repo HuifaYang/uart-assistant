@@ -1,0 +1,26 @@
+[package]
+name = "uart-assistant"
+version = "0.1.0"
+edition = "2021"
+description = "Lightweight cross-platform serial debug assistant"
+license = "MIT"
+
+[dependencies]
+chrono = "0.4.45"
+dirs = "7.0.0"
+encoding_rs = "0.8.44"
+rfd = "0.18.0"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+serialport = "4.10.1"
+slint = "1"
+
+[build-dependencies]
+slint-build = "1"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

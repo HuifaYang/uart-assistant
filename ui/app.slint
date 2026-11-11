@@ -1,0 +1,625 @@
+import { CheckBox, ComboBox, LineEdit, SpinBox, ListView, TextEdit, ProgressIndicator } from "std-widgets.slint";
+import { Palette, Card, PrimaryButton, GhostButton, ChipButton, FieldLabel, SectionLabel } from "theme.slint";
+
+export struct UiSegment {
+    text: string,
+    fg: color,
+    bold: bool,
+}
+
+export struct TabItem {
+    title: string,
+    connected: bool,
+}
+
+export component MacroDialog inherits Window {
+    title: "编辑宏命令";
+    width: 560px;
+    height: 420px;
+    background: Palette.bg;
+    in-out property <string> content;
+    callback save(string);
+    callback cancel();
+
+    VerticalLayout {
+        padding: 16px;
+        spacing: 12px;
+        Text {
+            text: "每行一个宏：名称 | 命令 | hex（可选）";
+            font-size: 13px;
+            font-weight: 650;
+            color: Palette.text;
+        }
+        Text {
+            text: "命令中的换行请用 \\r\\n 表示；第三列填 1 表示按 HEX 发送。";
+            font-size: 11px;
+            color: Palette.muted;
+        }
+        editor := TextEdit {
+            text <=> root.content;
+            font-family: "Consolas, monospace";
+            font-size: 12px;
+            vertical-stretch: 1;
+        }
+        HorizontalLayout {
+            spacing: 8px;
+            Rectangle { horizontal-stretch: 1; }
+            GhostButton {
+                text: "取消";
+                clicked => { root.cancel(); }
+            }
+            PrimaryButton {
+                text: "保存";
+                clicked => { root.save(editor.text); }
+            }
+        }
+    }
+}
+
+export component AppWindow inherits Window {
+    title: "UART Assistant";
+    min-width: 1060px;
+    min-height: 720px;
+    background: Palette.bg;
+    default-font-family: "Microsoft YaHei UI, Segoe UI, sans-serif";
+    default-font-size: 12px;
+
+    in-out property <[string]> device-names: [];
+    in-out property <int> device-index: -1;
+    in-out property <string> custom-port: "";
+    in-out property <[string]> baud-list: ["9600", "19200", "38400", "57600", "115200", "230400", "460800", "921600"];
+    in-out property <int> baud-index: 4;
+    in-out property <[string]> parity-list: ["None", "Odd", "Even"];
+    in-out property <int> parity-index: 0;
+    in-out property <int> data-bits-index: 3;
+    in-out property <int> stop-bits-index: 0;
+    in-out property <int> flow-index: 0;
+    in-out property <[string]> encoding-list: ["UTF-8", "GB18030", "GBK", "Big5", "Shift_JIS", "Latin-1"];
+    in-out property <int> encoding-index: 0;
+    in-out property <[TabItem]> tabs: [];
+    in-out property <int> active-tab: 0;
+    in-out property <[string]> macro-names: [];
+    in-out property <[[UiSegment]]> log-lines: [];
+    in-out property <[[UiSegment]]> terminal-lines: [];
+
+    in-out property <string> connection-label: "未连接";
+    in-out property <string> status-label: "就绪";
+    in-out property <string> rx-label: "RX 0";
+    in-out property <string> tx-label: "TX 0";
+    in-out property <string> device-label: "设备 0";
+    in-out property <string> record-label: "原始记录 关";
+    in-out property <string> log-summary: "0 行";
+    in-out property <string> transfer-label: "";
+    in-out property <float> transfer-progress: 0;
+    in-out property <bool> transfer-active: false;
+    in-out property <bool> connected: false;
+    in-out property <bool> record-active: false;
+    in-out property <string> xmodem-file: "未选择文件";
+
+    in-out property <bool> timestamps: false;
+    in-out property <bool> autoscroll: true;
+    in-out property <bool> paused: false;
+    in-out property <bool> echo-tx: false;
+    in-out property <bool> loop-send: false;
+    in-out property <bool> auto-reconnect: true;
+    in-out property <bool> append-newline: true;
+    in-out property <bool> hex-send: false;
+    in-out property <bool> show-advanced: false;
+    in-out property <bool> show-tools: false;
+    in-out property <bool> show-monitor: true;
+    in-out property <bool> multi-line: false;
+    in-out property <bool> use-1k: false;
+    in-out property <bool> dtr-state: false;
+    in-out property <bool> rts-state: false;
+    in-out property <string> highlight: "";
+    in-out property <string> search-text: "";
+    in-out property <string> send-text: "";
+    in-out property <string> multi-send-text: "";
+    in-out property <int> display-mode: 0;
+    in-out property <int> line-limit: 10000;
+    in-out property <int> loop-interval: 1000;
+    in-out property <int> renaming-index: -1;
+    in-out property <string> rename-text: "";
+
+    callback new-tab();
+    callback close-tab(int);
+    callback select-tab(int);
+    callback rename-save(int, string);
+    callback toggle-connect();
+    callback rescan();
+    callback device-changed(int);
+    callback send();
+    callback clear-log();
+    callback save-log();
+    callback toggle-record();
+    callback set-display-mode(int);
+    callback refresh-monitor();
+    callback dtr-changed(bool);
+    callback rts-changed(bool);
+    callback stm32(int);
+    callback choose-xmodem();
+    callback start-xmodem();
+    callback cancel-transfer();
+    callback edit-macros();
+    callback send-macro(int);
+    callback toggle-loop(bool);
+    callback loop-interval-changed(int);
+    callback toggle-terminal(bool);
+    callback terminal-key(string);
+    callback close-requested();
+
+    in-out property <length> log-viewport-y: 0px;
+
+    public function scroll-to-bottom() {
+        root.log-viewport-y = -1000000px;
+    }
+
+    VerticalLayout {
+        padding: 12px;
+        spacing: 10px;
+
+        HorizontalLayout {
+            spacing: 10px;
+            Text {
+                text: "UART Assistant";
+                font-size: 17px;
+                font-weight: 700;
+                color: Palette.text;
+                vertical-alignment: center;
+            }
+            Text {
+                text: "轻量串口调试工作台";
+                font-size: 11px;
+                color: Palette.muted;
+                vertical-alignment: center;
+            }
+            Rectangle { horizontal-stretch: 1; }
+            Text {
+                text: root.device-label;
+                font-size: 11px;
+                color: Palette.muted;
+                vertical-alignment: center;
+            }
+            GhostButton {
+                text: "+ 新建标签";
+                clicked => { root.new-tab(); }
+            }
+        }
+
+        Rectangle {
+            height: 34px;
+            HorizontalLayout {
+                spacing: 4px;
+                for tab[i] in root.tabs : Rectangle {
+                    min-width: 108px;
+                    border-radius: 7px;
+                    background: i == root.active-tab ? #ffffff : (tab-area.has-hover ? #e9edf4 : transparent);
+                    border-width: i == root.active-tab ? 1px : 0px;
+                    border-color: Palette.border;
+                    HorizontalLayout {
+                        padding-left: 10px;
+                        padding-right: 4px;
+                        spacing: 6px;
+                        Rectangle {
+                            width: 7px;
+                            height: 7px;
+                            border-radius: 4px;
+                            background: tab.connected ? #16a34a : #b6bdc9;
+                        }
+                        if root.renaming-index != i : Text {
+                            text: tab.title;
+                            font-size: 11px;
+                            font-weight: i == root.active-tab ? 650 : 400;
+                            color: i == root.active-tab ? Palette.text : Palette.muted;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                        }
+                        if root.renaming-index == i : LineEdit {
+                            text <=> root.rename-text;
+                            min-width: 96px;
+                            accepted => {
+                                root.rename-save(i, self.text);
+                                root.renaming-index = -1;
+                            }
+                        }
+                        Rectangle {
+                            width: 18px;
+                            border-radius: 4px;
+                            background: close-area.has-hover ? #f1f3f7 : transparent;
+                            Text {
+                                text: "×";
+                                font-size: 13px;
+                                color: Palette.muted;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                            close-area := TouchArea {
+                                clicked => { root.close-tab(i); }
+                            }
+                        }
+                    }
+                    tab-area := TouchArea {
+                        clicked => { root.select-tab(i); }
+                        double-clicked => {
+                            root.renaming-index = i;
+                            root.rename-text = tab.title;
+                        }
+                    }
+                }
+                Rectangle { horizontal-stretch: 1; }
+            }
+        }
+
+        Card {
+            VerticalLayout {
+                spacing: 8px;
+                HorizontalLayout {
+                    spacing: 8px;
+                    FieldLabel { text: "设备"; }
+                    ComboBox {
+                        model: root.device-names;
+                        current-index <=> root.device-index;
+                        min-width: 260px;
+                        selected => { root.device-changed(self.current-index); }
+                    }
+                    GhostButton {
+                        text: "刷新";
+                        clicked => { root.rescan(); }
+                    }
+                    FieldLabel { text: "波特率"; }
+                    ComboBox {
+                        model: root.baud-list;
+                        current-index <=> root.baud-index;
+                        min-width: 110px;
+                    }
+                    FieldLabel { text: "手动路径"; }
+                    LineEdit {
+                        text <=> root.custom-port;
+                        placeholder-text: "COM3 或 /dev/ttyS2";
+                        min-width: 150px;
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                    ChipButton {
+                        text: "高级设置";
+                        checked: root.show-advanced;
+                        clicked => { root.show-advanced = !root.show-advanced; }
+                    }
+                    PrimaryButton {
+                        text: root.connected ? "断开" : "连接";
+                        clicked => { root.toggle-connect(); }
+                    }
+                }
+                if root.show-advanced : HorizontalLayout {
+                    spacing: 8px;
+                    FieldLabel { text: "数据位"; }
+                    ComboBox {
+                        model: ["5", "6", "7", "8"];
+                        current-index <=> root.data-bits-index;
+                        min-width: 70px;
+                    }
+                    FieldLabel { text: "停止位"; }
+                    ComboBox {
+                        model: ["1", "2"];
+                        current-index <=> root.stop-bits-index;
+                        min-width: 70px;
+                    }
+                    FieldLabel { text: "校验"; }
+                    ComboBox {
+                        model: root.parity-list;
+                        current-index <=> root.parity-index;
+                        min-width: 90px;
+                    }
+                    FieldLabel { text: "流控"; }
+                    ComboBox {
+                        model: ["None", "RTS/CTS", "XON/XOFF"];
+                        current-index <=> root.flow-index;
+                        min-width: 120px;
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                    CheckBox {
+                        text: "断线自动重连";
+                        checked <=> root.auto-reconnect;
+                    }
+                }
+            }
+        }
+
+        Card {
+            vertical-stretch: 1;
+            VerticalLayout {
+                spacing: 8px;
+                HorizontalLayout {
+                    spacing: 6px;
+                    ChipButton {
+                        text: "监视器";
+                        checked: root.show-monitor;
+                        clicked => { root.toggle-terminal(false); }
+                    }
+                    ChipButton {
+                        text: "VT100 终端";
+                        checked: !root.show-monitor;
+                        clicked => { root.toggle-terminal(true); }
+                    }
+                    Rectangle { width: 12px; }
+                    if root.show-monitor : ChipButton {
+                        text: "普通";
+                        checked: root.display-mode == 0;
+                        clicked => { root.set-display-mode(0); }
+                    }
+                    if root.show-monitor : ChipButton {
+                        text: "HEX";
+                        checked: root.display-mode == 1;
+                        clicked => { root.set-display-mode(1); }
+                    }
+                    if root.show-monitor : ChipButton {
+                        text: "ASCII+HEX";
+                        checked: root.display-mode == 2;
+                        clicked => { root.set-display-mode(2); }
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                    Text {
+                        text: root.log-summary;
+                        font-size: 11px;
+                        color: Palette.muted;
+                        vertical-alignment: center;
+                    }
+                }
+
+                if root.show-monitor : HorizontalLayout {
+                    spacing: 6px;
+                    CheckBox { text: "时间戳"; checked <=> root.timestamps; }
+                    CheckBox { text: "自动滚屏"; checked <=> root.autoscroll; }
+                    CheckBox { text: "暂停"; checked <=> root.paused; }
+                    FieldLabel { text: "编码"; }
+                    ComboBox {
+                        model: root.encoding-list;
+                        current-index <=> root.encoding-index;
+                        min-width: 100px;
+                        selected => { root.refresh-monitor(); }
+                    }
+                    FieldLabel { text: "行数"; }
+                    SpinBox {
+                        value <=> root.line-limit;
+                        minimum: 200;
+                        maximum: 30000;
+                        step-size: 1000;
+                        min-width: 96px;
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                    GhostButton { text: "清空"; clicked => { root.clear-log(); } }
+                    GhostButton { text: "保存日志"; clicked => { root.save-log(); } }
+                    GhostButton {
+                        text: root.record-active ? "停止记录" : "原始记录";
+                        clicked => { root.toggle-record(); }
+                    }
+                }
+
+                if root.show-monitor : HorizontalLayout {
+                    spacing: 6px;
+                    FieldLabel { text: "搜索"; }
+                    LineEdit {
+                        text <=> root.search-text;
+                        placeholder-text: "过滤日志行";
+                        min-width: 170px;
+                    }
+                    FieldLabel { text: "高亮"; }
+                    LineEdit {
+                        text <=> root.highlight;
+                        placeholder-text: "关键词";
+                        min-width: 130px;
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                    FieldLabel { text: "状态"; }
+                    Text {
+                        text: root.status-label;
+                        font-size: 11px;
+                        color: Palette.muted;
+                        vertical-alignment: center;
+                    }
+                }
+
+                if root.show-monitor : Rectangle {
+                    vertical-stretch: 1;
+                    background: #ffffff;
+                    border-radius: 7px;
+                    border-width: 1px;
+                    border-color: #eceff4;
+                    log-list := ListView {
+                        content-y <=> root.log-viewport-y;
+                        for line in root.log-lines : HorizontalLayout {
+                            spacing: 0px;
+                            padding-left: 10px;
+                            padding-right: 10px;
+                            min-height: 19px;
+                            for seg in line : Text {
+                                text: seg.text;
+                                color: seg.fg;
+                                font-weight: seg.bold ? 700 : 400;
+                                font-family: "Cascadia Mono, Consolas, monospace";
+                                font-size: 12px;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                }
+
+                if !root.show-monitor : Rectangle {
+                    vertical-stretch: 1;
+                    background: Palette.terminal-bg;
+                    border-radius: 7px;
+                    ListView {
+                        for line in root.terminal-lines : HorizontalLayout {
+                            spacing: 0px;
+                            padding-left: 8px;
+                            min-height: 17px;
+                            for seg in line : Text {
+                                text: seg.text;
+                                color: seg.fg;
+                                font-weight: seg.bold ? 700 : 400;
+                                font-family: "Cascadia Mono, Consolas, monospace";
+                                font-size: 12px;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                }
+                if !root.show-monitor : LineEdit {
+                    placeholder-text: "终端输入：回车发送，支持 VT100 控制键";
+                    text <=> root.send-text;
+                    accepted => { root.terminal-key(self.text); }
+                }
+            }
+        }
+
+        Card {
+            VerticalLayout {
+                spacing: 8px;
+                HorizontalLayout {
+                    spacing: 8px;
+                    LineEdit {
+                        horizontal-stretch: 1;
+                        text <=> root.send-text;
+                        placeholder-text: "输入命令，回车发送";
+                        accepted => { root.send(); }
+                    }
+                    ChipButton {
+                        text: "多行";
+                        checked: root.multi-line;
+                        clicked => { root.multi-line = !root.multi-line; }
+                    }
+                    ChipButton {
+                        text: "HEX 发送";
+                        checked: root.hex-send;
+                        clicked => { root.hex-send = !root.hex-send; }
+                    }
+                    ChipButton {
+                        text: "加换行";
+                        checked: root.append-newline;
+                        clicked => { root.append-newline = !root.append-newline; }
+                    }
+                    ChipButton {
+                        text: "显示发送";
+                        checked: root.echo-tx;
+                        clicked => { root.echo-tx = !root.echo-tx; }
+                    }
+                    ChipButton {
+                        text: "循环发送";
+                        checked: root.loop-send;
+                        clicked => { root.loop-send = !root.loop-send; root.toggle-loop(root.loop-send); }
+                    }
+                    SpinBox {
+                        value <=> root.loop-interval;
+                        minimum: 50;
+                        maximum: 60000;
+                        step-size: 100;
+                        min-width: 100px;
+                    }
+                    PrimaryButton {
+                        text: "发送";
+                        enabled: !root.transfer-active;
+                        clicked => { root.send(); }
+                    }
+                }
+                if root.multi-line : TextEdit {
+                    text <=> root.multi-send-text;
+                    min-height: 72px;
+                    font-family: "Consolas, monospace";
+                    font-size: 12px;
+                }
+                HorizontalLayout {
+                    spacing: 6px;
+                    FieldLabel { text: "宏命令"; }
+                    for name[i] in root.macro-names : ChipButton {
+                        text: name;
+                        clicked => { root.send-macro(i); }
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                    GhostButton { text: "编辑宏"; clicked => { root.edit-macros(); } }
+                }
+            }
+        }
+
+        Card {
+            VerticalLayout {
+                spacing: 8px;
+                HorizontalLayout {
+                    spacing: 8px;
+                    ChipButton {
+                        text: "设备工具";
+                        checked: root.show-tools;
+                        clicked => { root.show-tools = !root.show-tools; }
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                    Text {
+                        text: root.record-label;
+                        font-size: 11px;
+                        color: root.record-active ? #b45309 : Palette.muted;
+                        vertical-alignment: center;
+                    }
+                    if root.transfer-active : ProgressIndicator {
+                        progress: root.transfer-progress;
+                        width: 140px;
+                    }
+                    if root.transfer-active : Text {
+                        text: root.transfer-label;
+                        font-size: 11px;
+                        color: Palette.muted;
+                        vertical-alignment: center;
+                    }
+                    if root.transfer-active : GhostButton {
+                        text: "取消传输";
+                        clicked => { root.cancel-transfer(); }
+                    }
+                }
+                if root.show-tools : HorizontalLayout {
+                    spacing: 8px;
+                    FieldLabel { text: "线路"; }
+                    CheckBox {
+                        text: "DTR";
+                        checked <=> root.dtr-state;
+                        toggled => { root.dtr-changed(self.checked); }
+                    }
+                    CheckBox {
+                        text: "RTS";
+                        checked <=> root.rts-state;
+                        toggled => { root.rts-changed(self.checked); }
+                    }
+                    Rectangle { width: 10px; }
+                    FieldLabel { text: "STM32"; }
+                    GhostButton { text: "复位"; clicked => { root.stm32(0); } }
+                    GhostButton { text: "进 Bootloader"; clicked => { root.stm32(1); } }
+                    Rectangle { width: 10px; }
+                    FieldLabel { text: "XModem"; }
+                    GhostButton { text: "选择文件"; clicked => { root.choose-xmodem(); } }
+                    Text {
+                        text: root.xmodem-file;
+                        font-size: 11px;
+                        color: Palette.muted;
+                        vertical-alignment: center;
+                    }
+                    CheckBox { text: "1K"; checked <=> root.use-1k; }
+                    GhostButton { text: "发送文件"; clicked => { root.start-xmodem(); } }
+                    Rectangle { horizontal-stretch: 1; }
+                }
+            }
+        }
+
+        Rectangle {
+            height: 26px;
+            HorizontalLayout {
+                spacing: 14px;
+                Text {
+                    text: root.connection-label;
+                    font-size: 11px;
+                    font-weight: 650;
+                    color: root.connected ? #00875a : Palette.muted;
+                    vertical-alignment: center;
+                }
+                Text { text: root.rx-label; font-size: 11px; color: Palette.muted; vertical-alignment: center; }
+                Text { text: root.tx-label; font-size: 11px; color: Palette.muted; vertical-alignment: center; }
+                Rectangle { horizontal-stretch: 1; }
+                Text { text: root.status-label; font-size: 11px; color: Palette.muted; vertical-alignment: center; }
+            }
+        }
+    }
+}

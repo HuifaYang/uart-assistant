@@ -1,0 +1,100 @@
+export global Palette {
+    in-out property <color> bg: #f4f6f9;
+    in-out property <color> surface: #ffffff;
+    in-out property <color> border: #e4e8ef;
+    in-out property <color> text: #1f2328;
+    in-out property <color> muted: #6b7280;
+    in-out property <color> accent: #2563eb;
+    in-out property <color> soft: #f8fafc;
+    in-out property <color> terminal-bg: #11151b;
+}
+
+export component Card inherits Rectangle {
+    background: Palette.surface;
+    border-radius: 10px;
+    border-width: 1px;
+    border-color: Palette.border;
+    VerticalLayout {
+        padding: 10px;
+        spacing: 8px;
+        @children
+    }
+}
+
+export component PrimaryButton inherits Rectangle {
+    in-out property <string> text <=> label.text;
+    in-out property <bool> enabled: true;
+    callback clicked;
+    height: 32px;
+    min-width: 88px;
+    border-radius: 7px;
+    background: !root.enabled ? #e8ecf2 : area.pressed ? #1b4bc0 : area.has-hover ? #2159de : #2563eb;
+    label := Text {
+        color: root.enabled ? #ffffff : #9aa3b2;
+        font-size: 12px;
+        font-weight: 650;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    area := TouchArea {
+        enabled: root.enabled;
+        clicked => { root.clicked(); }
+    }
+}
+
+export component GhostButton inherits Rectangle {
+    in-out property <string> text <=> label.text;
+    in-out property <bool> enabled: true;
+    callback clicked;
+    height: 30px;
+    min-width: 68px;
+    border-radius: 7px;
+    background: !root.enabled ? #f0f2f6 : area.pressed ? #e4e9f1 : area.has-hover ? #eef2f8 : #ffffff;
+    border-width: 1px;
+    border-color: #d8dee8;
+    label := Text {
+        color: root.enabled ? #3b4250 : #a3abba;
+        font-size: 12px;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    area := TouchArea {
+        enabled: root.enabled;
+        clicked => { root.clicked(); }
+    }
+}
+
+export component ChipButton inherits Rectangle {
+    in-out property <string> text <=> label.text;
+    in-out property <bool> checked: false;
+    callback clicked;
+    height: 26px;
+    min-width: 58px;
+    border-radius: 6px;
+    background: root.checked ? #e8effd : area.has-hover ? #f0f3f8 : #ffffff;
+    border-width: 1px;
+    border-color: root.checked ? #b9cdf7 : #e2e6ed;
+    label := Text {
+        color: root.checked ? #1d4ed8 : #4b5563;
+        font-size: 11px;
+        font-weight: root.checked ? 650 : 400;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    area := TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
+
+export component FieldLabel inherits Text {
+    color: #6b7280;
+    font-size: 11px;
+    vertical-alignment: center;
+}
+
+export component SectionLabel inherits Text {
+    color: #3b4250;
+    font-size: 12px;
+    font-weight: 650;
+    vertical-alignment: center;
+}

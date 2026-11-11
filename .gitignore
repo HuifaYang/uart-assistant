@@ -1,13 +1,15 @@
-__pycache__/
-*.py[cod]
-*.egg-info/
-.venv/
-venv/
-build/
-dist/
-.pytest_cache/
-.coverage
+# Rust / Cargo
+/target/
+**/*.rs.bk
+
+# Local Rust toolchain installed inside the workspace (regenerable, not committed)
+/.toolchain/
+
+# Logs and temporary output
+*.log
+
+# Editor / OS
 .idea/
 .vscode/
-prompt.txt
 .DS_Store
+Thumbs.db
