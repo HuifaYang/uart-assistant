@@ -162,11 +162,12 @@
   .cbtn.wide{min-width:72px;}
   .cbtn.on{background:var(--accent-soft); border-color:var(--accent-border); color:var(--accent);}
 
-  .log-scroll{flex:1; min-height:0; overflow-y:auto; overflow-x:hidden; position:relative;}
+  .log-scroll{flex:1; min-height:0; overflow-y:auto; overflow-x:hidden; position:relative; scrollbar-gutter:stable;}
+  .log-scroll.nowrap{overflow-x:auto;}
   .log-inner{position:relative; min-height:100%;}
   .log-rows{position:absolute; inset:0;}
   .log-rows .row{
-    position:absolute; left:0; right:0; padding-left:8px;
+    position:absolute; left:0; right:0; padding:0 10px 0 8px;
     height:var(--row-h); line-height:var(--row-h);
     font-family:var(--mono); font-size:var(--log-size);
     white-space:pre; overflow:hidden; color:var(--log-text);
@@ -347,6 +348,7 @@
         <span class="pill" id="timestampsBtn">时间戳</span>
         <span class="pill on" id="autoscrollBtn">滚屏</span>
         <span class="pill" id="pausedBtn">暂停</span>
+        <span class="pill on" id="wrapBtn">换行</span>
         <div class="combo" id="encCombo"><span id="encLabel">UTF-8</span><span class="caret">▾</span></div>
       </div>
       <input class="search" id="searchInput" placeholder="搜索日志">
@@ -477,7 +479,17 @@
 
   const S = {
     lines: [],
+    vis: [],
+    visShift: 0,
     view: null,
+    visMaxW: 0,
+    m: null,
+    layoutW: -1,
+    needRebuild: true,
+    wrap: true,
+    hang: 2,
+    hangPx: 0,
+    cw: 0,
     search: "",
     termRows: [],
     tabs: [],
@@ -606,6 +618,7 @@
     $("logScroll").classList.toggle("hidden", c.kind === 1);
     $("termView").classList.toggle("hidden", c.kind !== 1);
     if (c.kind === 1) setTimeout(() => $("termView").focus(), 0);
+    $("wrapBtn").classList.toggle("on", S.wrap);
 
     for (const el of document.querySelectorAll("[data-mode]")) {
       el.classList.toggle("on", Number(el.dataset.mode) === c.mode);
@@ -686,23 +699,114 @@
     }
   }
 
-  // ── 日志 ─────────────────────────────────────────────
-  function applyLog(ev) {
-    if (ev.reset) { S.lines = []; S.view = null; S.total = 0; }
-    if (ev.drop > 0) {
-      S.lines.splice(0, ev.drop);
-      if (S.view) S.view = S.view.filter((i) => i >= ev.drop).map((i) => i - ev.drop);
+  // ── 日志排版 ─────────────────────────────────────────
+  // 逻辑行按像素宽度切成若干「视觉行」，每行固定行高，仍是虚拟滚动；
+  // 续行（cont）加悬挂缩进，让换行处一眼可辨。
+  const PADL = 8, PADR = 10;
+  const probe = document.createElement("div");
+  probe.style.cssText = "position:fixed; left:-20000px; top:0; margin:0; padding:0; border:0;" +
+    "white-space:pre; visibility:hidden; pointer-events:none; font-family:var(--mono);";
+  document.body.appendChild(probe);
+  const cwAscii = new Float64Array(128);
+  const cwCache = new Map();
+
+  function measure(text) {
+    if (probe.textContent !== text) probe.textContent = text;
+    return probe.getBoundingClientRect().width;
+  }
+  function refreshMetrics() {
+    probe.style.fontSize = S.fontPx + "px";
+    const unit = measure("0".repeat(40)) / 40;
+    const w = unit > 0 ? unit : S.fontPx * 0.6;
+    for (let c = 0; c < 128; c++) cwAscii[c] = w;
+    cwCache.clear();
+    S.cw = w;
+  }
+  function charW(ch) {
+    if (ch.length === 1) {
+      const c = ch.charCodeAt(0);
+      if (c >= 32 && c < 127) return cwAscii[c];
     }
-    if (ev.append && ev.append.length) {
-      const base = S.lines.length;
-      for (let i = 0; i < ev.append.length; i++) {
-        const line = ev.append[i];
-        S.lines.push(line);
-        if (S.search && lineText(line).toLowerCase().includes(S.search)) S.view.push(base + i);
+    let w = cwCache.get(ch);
+    if (w === undefined) { w = measure(ch); cwCache.set(ch, w); }
+    return w;
+  }
+  function lineWidth(text) {
+    let w = 0;
+    for (let i = 0; i < text.length; ) {
+      const code = text.codePointAt(i);
+      const step = code > 0xffff ? 2 : 1;
+      w += charW(step === 2 ? text.slice(i, i + 2) : text[i]);
+      i += step;
+    }
+    return w;
+  }
+  function logMetrics() {
+    const w = $("logScroll").clientWidth || 640;
+    const avail = Math.max(80, w - PADL - PADR - 4);
+    const hang = S.hang > 0 ? Math.round(S.hang * (S.cw || S.fontPx * 0.6)) : 0;
+    S.hangPx = hang;
+    return { first: avail, cont: Math.max(60, avail - hang), hang: hang };
+  }
+  // 把一条逻辑行切成一到多个视觉行，写进 out（key 用于抵消前端丢行）
+  function layoutLine(key, text, m, out) {
+    text = text || "";
+    if (!S.wrap) {
+      const w = lineWidth(text);
+      if (w > S.visMaxW) S.visMaxW = w;
+      out.push({ k: key, s: 0, e: text.length, cont: false });
+      return;
+    }
+    if (!text.length) { out.push({ k: key, s: 0, e: 0, cont: false }); return; }
+    let s = 0, w = 0, avail = m.first, cont = false;
+    for (let i = 0; i < text.length; ) {
+      const code = text.codePointAt(i);
+      const step = code > 0xffff ? 2 : 1;
+      const ch = step === 2 ? text.slice(i, i + 2) : text[i];
+      const cwid = charW(ch);
+      if (w + cwid > avail && i > s) {
+        out.push({ k: key, s: s, e: i, cont: cont });
+        s = i; w = 0; avail = m.cont; cont = true;
       }
+      w += cwid;
+      i += step;
     }
-    if (typeof ev.total === "number") S.total = ev.total;
-    if (S.lines.length > S.total) S.lines.splice(0, S.lines.length - S.total);
+    out.push({ k: key, s: s, e: text.length, cont: cont });
+  }
+  function applyInnerWidth() {
+    const sc = $("logScroll"), inner = $("logInner");
+    if (S.wrap) {
+      sc.classList.remove("nowrap");
+      inner.style.width = "";
+    } else {
+      sc.classList.add("nowrap");
+      inner.style.width = Math.max(sc.clientWidth, Math.ceil(S.visMaxW) + PADL + PADR + 4) + "px";
+    }
+  }
+  function rebuildLayout() {
+    refreshMetrics();
+    const m = logMetrics();
+    S.m = m;
+    S.visMaxW = 0;
+    S.vis = [];
+    S.visShift = 0;
+    if (S.view) {
+      for (let k = 0; k < S.view.length; k++) {
+        const li = S.view[k];
+        layoutLine(li, lineText(S.lines[li]), m, S.vis);
+      }
+    } else {
+      for (let li = 0; li < S.lines.length; li++) layoutLine(li, lineText(S.lines[li]), m, S.vis);
+    }
+    S.layoutW = $("logScroll").clientWidth;
+    S.needRebuild = false;
+    applyInnerWidth();
+  }
+  function ensureLayout() {
+    if (S.needRebuild || $("logScroll").clientWidth !== S.layoutW) rebuildLayout();
+  }
+  function flush() {
+    ensureLayout();
     updateHeight();
     updateEmpty();
     updateLineLabel();
@@ -710,26 +814,70 @@
     renderRows();
   }
 
+  function applyLog(ev) {
+    ensureLayout();
+    const m = S.m || logMetrics();
+    if (ev.reset) {
+      S.lines = []; S.total = 0; S.vis = []; S.visMaxW = 0; S.visShift = 0;
+      S.view = S.search ? [] : null;
+      if (!S.wrap) $("logInner").style.width = "";
+    }
+    if (ev.drop > 0) {
+      S.lines.splice(0, ev.drop);
+      if (S.view) S.view = S.view.filter((i) => i >= ev.drop).map((i) => i - ev.drop);
+      const cutLimit = ev.drop + S.visShift;
+      let cut = 0;
+      while (cut < S.vis.length && S.vis[cut].k < cutLimit) cut++;
+      if (cut) S.vis.splice(0, cut);
+      S.visShift = cutLimit;
+    }
+    if (ev.append && ev.append.length) {
+      const base = S.lines.length;
+      for (let i = 0; i < ev.append.length; i++) {
+        const raw = ev.append[i];
+        const line = Array.isArray(raw) ? raw : [[String(raw), 0, 0]];
+        const text = lineText(line);
+        S.lines.push(line);
+        const li = base + i;
+        const key = li + S.visShift;
+        if (S.search) {
+          if (text.toLowerCase().includes(S.search)) {
+            if (!S.view) S.view = [];
+            S.view.push(li);
+            layoutLine(key, text, m, S.vis);
+          }
+        } else {
+          layoutLine(key, text, m, S.vis);
+        }
+      }
+    }
+    if (typeof ev.total === "number") S.total = ev.total;
+    if (S.lines.length > S.total) {
+      S.lines.splice(0, S.lines.length - S.total);
+      S.needRebuild = true;
+    }
+    if (!S.wrap) applyInnerWidth();
+    flush();
+  }
+
   function lineText(line) {
     let out = "";
     for (const seg of line) out += seg[0];
     return out;
   }
-  function rowCount() { return S.view ? S.view.length : S.lines.length; }
-  function lineOf(row) { return S.lines[S.view ? S.view[row] : row]; }
   function updateLineLabel() {
     const total = S.lines.length;
     $("lineLabel").textContent = S.view ? (S.view.length + " / " + total + " 行") : (total + " 行");
   }
   function updateEmpty() {
     const empty = $("emptyState");
-    if (rowCount() > 0) { empty.style.display = "none"; return; }
+    if (S.vis.length > 0) { empty.style.display = "none"; return; }
     empty.style.display = "flex";
     empty.querySelector(".empty-title").textContent = S.search ? "没有匹配的日志" : "还没有数据";
     empty.querySelector(".empty-sub").textContent = S.search ? "换个关键词试试" : "选择设备并点击「连接」，串口数据会显示在这里";
   }
   function updateHeight() {
-    $("logInner").style.height = (rowCount() * S.rowH + PAD * 2) + "px";
+    $("logInner").style.height = (S.vis.length * S.rowH + PAD * 2) + "px";
   }
   function stickBottom() {
     const sc = $("logScroll");
@@ -745,11 +893,8 @@
     } else {
       S.view = null;
     }
-    updateHeight();
-    updateEmpty();
-    updateLineLabel();
-    if (S.autoScroll && S.follow) stickBottom();
-    renderRows();
+    S.needRebuild = true;
+    flush();
   }
 
   let renderPending = false;
@@ -768,41 +913,54 @@
     row.appendChild(span);
   }
 
-  function addLineContent(row, line) {
-    const needle = S.search;
-    if (!needle) {
-      for (const seg of line) addSpan(row, seg[0], ROLE[seg[1]] || ROLE[0], seg[2]);
-      return;
+  function addSegment(row, text, color, bold, needle) {
+    if (!text) return;
+    if (!needle) { addSpan(row, text, color, bold); return; }
+    const lower = text.toLowerCase();
+    let i = 0;
+    for (;;) {
+      const j = lower.indexOf(needle, i);
+      if (j < 0) { addSpan(row, text.slice(i), color, bold); break; }
+      addSpan(row, text.slice(i, j), color, bold);
+      addSpan(row, text.slice(j, j + needle.length), "var(--log-hl)", 1);
+      i = j + needle.length;
     }
+  }
+
+  // 只渲染逻辑行 [from, to) 这段字符，供视觉行使用
+  function addLineContent(row, line, from, to) {
+    const needle = S.search;
+    let off = 0;
     for (const seg of line) {
       const text = seg[0];
-      const color = ROLE[seg[1]] || ROLE[0];
-      const lower = text.toLowerCase();
-      let i = 0;
-      for (;;) {
-        const j = lower.indexOf(needle, i);
-        if (j < 0) { addSpan(row, text.slice(i), color, seg[2]); break; }
-        addSpan(row, text.slice(i, j), color, seg[2]);
-        addSpan(row, text.slice(j, j + needle.length), "var(--log-hl)", 1);
-        i = j + needle.length;
+      const end = off + text.length;
+      if (end > from && off < to) {
+        const a = Math.max(from, off) - off;
+        const b = Math.min(to, end) - off;
+        addSegment(row, text.slice(a, b), ROLE[seg[1]] || ROLE[0], seg[2], needle);
       }
+      off = end;
     }
   }
 
   function renderRows() {
+    ensureLayout();
     const sc = $("logScroll");
     const h = S.rowH;
-    const rows = rowCount();
+    const total = S.vis.length;
     const top = sc.scrollTop;
     const viewH = sc.clientHeight;
     const first = Math.max(0, Math.floor(top / h) - 4);
-    const last = Math.min(rows, Math.ceil((top + viewH) / h) + 4);
+    const last = Math.min(total, Math.ceil((top + viewH) / h) + 4);
     const frag = document.createDocumentFragment();
+    const hang = S.hangPx;
     for (let i = first; i < last; i++) {
+      const v = S.vis[i];
       const row = document.createElement("div");
       row.className = "row";
       row.style.top = (PAD + i * h) + "px";
-      addLineContent(row, lineOf(i));
+      if (v.cont && hang) row.style.paddingLeft = (PADL + hang) + "px";
+      addLineContent(row, S.lines[v.k - S.visShift], v.s, v.e);
       frag.appendChild(row);
     }
     $("logRows").replaceChildren(frag);
@@ -827,12 +985,13 @@
   function setFont(px, quiet) {
     const size = Math.max(9, Math.min(32, Math.round(px)));
     const sc = $("logScroll");
-    const anchor = S.rowH > 0 ? sc.scrollTop / S.rowH : 0;
+    const anchor = S.rowH > 0 ? Math.floor(sc.scrollTop / S.rowH) : 0;
     S.fontPx = size;
     S.rowH = Math.max(14, Math.round(size * 1.54));
     document.documentElement.style.setProperty("--log-size", size + "px");
     document.documentElement.style.setProperty("--row-h", S.rowH + "px");
-    for (const row of document.querySelectorAll(".row")) row.style.height = S.rowH + "px";
+    S.needRebuild = true;
+    ensureLayout();
     updateHeight();
     sc.scrollTop = anchor * S.rowH;
     renderRows();
@@ -851,7 +1010,7 @@
     setFont(S.fontPx + (e.deltaY < 0 ? 1 : -1));
     cmd({ cmd: "font", value: S.fontPx });
   }, { passive: false });
-  window.addEventListener("resize", () => { updateHeight(); scheduleRender(); });
+  window.addEventListener("resize", () => flush());
 
   // ── 菜单 ─────────────────────────────────────────────
   const menu = $("menu");
@@ -923,6 +1082,14 @@
     cmd({ cmd: "autoscroll", value: next });
   });
   $("pausedBtn").addEventListener("click", (e) => { e.stopPropagation(); cmd({ cmd: "paused", value: !S.cfg.paused }); });
+  $("wrapBtn").addEventListener("click", (e) => {
+    e.stopPropagation();
+    S.wrap = !S.wrap;
+    $("wrapBtn").classList.toggle("on", S.wrap);
+    S.needRebuild = true;
+    flush();
+    toast(S.wrap ? "自动换行" : "不换行，可横向滚动");
+  });
   let searchTimer = 0;
   $("searchInput").addEventListener("input", (e) => {
     clearTimeout(searchTimer);
