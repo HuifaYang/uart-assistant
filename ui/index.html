@@ -80,7 +80,6 @@
   .dot{width:7px; height:7px; border-radius:3.5px; background:var(--faint); flex:0 0 7px;}
   .dot.on{background:var(--ok);}
   .status-row .label{font-size:12px; font-weight:500; color:var(--secondary);}
-  .status-row .counts{margin-left:auto; font-family:var(--mono); font-size:10.5px; color:var(--faint);}
   .status-card .port{font-family:var(--mono); font-size:11px; color:var(--muted);
     overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
 
@@ -236,8 +235,6 @@
   .tools-panel .ghost{height:26px; font-size:12px;}
   .progress{width:120px; height:5px; border-radius:3px; background:var(--surface2); overflow:hidden;}
   .progress > i{display:block; height:100%; width:0; background:var(--accent); transition:width .12s linear;}
-  .statusline{height:18px; flex:0 0 18px; display:flex; gap:10px; align-items:center; font-size:11px; color:var(--faint);}
-  .statusline .right{margin-left:auto; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:50%;}
 
   /* 终端模式下隐藏显示栏/发送栏/工具 */
   main.term-mode .display-bar, main.term-mode .send-bar, main.term-mode .tools, main.term-mode .tools-panel, main.term-mode .more, main.term-mode .params{display:none;}
@@ -316,7 +313,6 @@
       <div class="status-row">
         <span class="dot" id="sideDot"></span>
         <span class="label" id="sideState">未连接</span>
-        <span class="counts" id="sideCounts">RX 0 TX 0</span>
       </div>
       <div class="port" id="sidePort">未选择设备</div>
     </div>
@@ -348,7 +344,7 @@
         <span class="pill" id="timestampsBtn">时间戳</span>
         <span class="pill on" id="autoscrollBtn">滚屏</span>
         <span class="pill" id="pausedBtn">暂停</span>
-        <span class="pill on" id="wrapBtn">换行</span>
+        <span class="pill on" id="wrapBtn">自动换行</span>
         <div class="combo" id="encCombo"><span id="encLabel">UTF-8</span><span class="caret">▾</span></div>
       </div>
       <input class="search" id="searchInput" placeholder="搜索日志">
@@ -360,7 +356,7 @@
         <b id="consoleTitle">接收数据</b>
         <span class="meta" id="rxLabel">RX 0</span>
         <span class="meta" id="txLabel">TX 0</span>
-        <span class="vsep"></span>
+        <span class="vsep" id="lineSep"></span>
         <span class="meta" id="lineLabel">0 行</span>
         <div class="rec hidden" id="recIndicator"><span class="rec-dot"></span><span id="recText">原始记录</span></div>
         <span class="grow"></span>
@@ -405,7 +401,7 @@
       <button class="pill" id="loopBtn">开启</button>
     </div>
 
-    <div class="tools" id="toolsRow"><span class="arrow" id="toolsArrow">▸</span><span>设备工具</span><span class="right" id="toolsText">就绪</span></div>
+    <div class="tools" id="toolsRow"><span class="arrow" id="toolsArrow">▸</span><span>设备工具</span><span class="right" id="toolsText"></span></div>
 
     <div class="tools-panel hidden" id="toolsPanel">
       <span class="label">线路</span>
@@ -424,8 +420,6 @@
       <button class="ghost hidden" id="xmodemCancel">取消</button>
       <div class="progress hidden" id="xmodemProgress"><i id="xmodemBar"></i></div>
     </div>
-
-    <div class="statusline"><span id="statusLeft">未连接</span><span>|</span><span id="statusMid">0 行 · UTF-8</span><span class="right" id="statusRight">就绪</span></div>
   </main>
 
   <div class="menu" id="menu"></div>
@@ -619,6 +613,8 @@
     $("termView").classList.toggle("hidden", c.kind !== 1);
     if (c.kind === 1) setTimeout(() => $("termView").focus(), 0);
     $("wrapBtn").classList.toggle("on", S.wrap);
+    $("lineSep").classList.toggle("hidden", c.kind === 1);
+    $("lineLabel").classList.toggle("hidden", c.kind === 1);
 
     for (const el of document.querySelectorAll("[data-mode]")) {
       el.classList.toggle("on", Number(el.dataset.mode) === c.mode);
@@ -677,13 +673,9 @@
     $("sideDot").classList.toggle("on", s.connected);
     $("sideState").textContent = s.state;
     $("sideState").style.color = s.connected ? "var(--ok)" : "var(--secondary)";
-    $("sideCounts").textContent = "RX " + s.rx + " TX " + s.tx;
     $("rxLabel").textContent = "RX " + s.rx;
     $("txLabel").textContent = "TX " + s.tx;
     updateLineLabel();
-    $("statusLeft").textContent = s.state + (s.port ? " · " + s.port : "");
-    $("statusMid").textContent = s.lines + " 行 · " + $("encLabel").textContent;
-    $("statusRight").textContent = s.msg || "就绪";
     $("recIndicator").classList.toggle("hidden", !s.recording);
     $("recText").textContent = s.recordText || "原始记录";
     $("recordBtn").textContent = s.recording ? "停止记录" : "原始记录";
@@ -695,7 +687,7 @@
       $("xmodemBar").style.width = Math.round((s.progress || 0) * 100) + "%";
       $("toolsText").textContent = s.transferText || "传输中";
     } else {
-      $("toolsText").textContent = s.msg || "就绪";
+      $("toolsText").textContent = s.msg || "";
     }
   }
 
@@ -759,14 +751,31 @@
     }
     if (!text.length) { out.push({ k: key, s: 0, e: 0, cont: false }); return; }
     let s = 0, w = 0, avail = m.first, cont = false;
-    for (let i = 0; i < text.length; ) {
+    let i = 0;
+    while (i < text.length) {
       const code = text.codePointAt(i);
       const step = code > 0xffff ? 2 : 1;
       const ch = step === 2 ? text.slice(i, i + 2) : text[i];
       const cwid = charW(ch);
       if (w + cwid > avail && i > s) {
-        out.push({ k: key, s: s, e: i, cont: cont });
-        s = i; w = 0; avail = m.cont; cont = true;
+        // 优先在空格处断开，且保证断点之后的尾巴能放进续行
+        let brk = -1;
+        let tail = 0;
+        for (let j = i - 1; j > s; j--) {
+          if (text.charCodeAt(j) === 32 && tail + cwid <= m.cont) { brk = j; break; }
+          tail += charW(text[j]);
+        }
+        if (brk > s) {
+          out.push({ k: key, s: s, e: brk, cont: cont });
+          s = brk + 1; // 断点处的空格丢弃
+          w = tail;
+        } else {
+          out.push({ k: key, s: s, e: i, cont: cont });
+          s = i;
+          w = 0;
+        }
+        avail = m.cont;
+        cont = true;
       }
       w += cwid;
       i += step;

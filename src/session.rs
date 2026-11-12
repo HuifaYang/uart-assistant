@@ -58,10 +58,8 @@ impl Worker {
                 self.port = Some(port);
                 self.reconnect = None;
                 self.emit(tx, SessionEvent::State(ConnectionState::Connected));
-                self.emit(
-                    tx,
-                    SessionEvent::Message(format!("已连接 {} @ {}", self.settings.port, self.settings.baud)),
-                );
+                // 连接状态由指示灯/状态卡表达，这里只清空提示，避免同一句话重复显示
+                self.emit(tx, SessionEvent::Message(String::new()));
             }
             Err(err) => {
                 self.emit(tx, SessionEvent::State(ConnectionState::Disconnected));
@@ -88,7 +86,7 @@ impl Worker {
                 self.loop_enabled = false;
                 self.cancel.store(true, Ordering::Relaxed);
                 self.emit(tx, SessionEvent::State(ConnectionState::Disconnected));
-                self.emit(tx, SessionEvent::Message(if matches!(cmd, Command::Close) { "已断开" } else { "已停止重连" }.into()));
+                self.emit(tx, SessionEvent::Message(if matches!(cmd, Command::Close) { String::new() } else { "已停止重连".into() }));
             }
             Command::Send(data) => {
                 if let Some(port) = self.port.as_mut() {
@@ -266,7 +264,7 @@ impl Worker {
                 Ok(port) => {
                     self.port = Some(port);
                     self.emit(tx, SessionEvent::State(ConnectionState::Connected));
-                    self.emit(tx, SessionEvent::Message("重连成功".into()));
+                    self.emit(tx, SessionEvent::Message(String::new()));
                     return;
                 }
                 Err(err) => self.emit(tx, SessionEvent::Message(format!("重连失败: {}", err))),
@@ -372,7 +370,7 @@ impl Session {
             auto_reconnect,
             rx_bytes: 0,
             tx_bytes: 0,
-            last_message: "就绪".into(),
+            last_message: String::new(),
             transferring: false,
             transfer_text: String::new(),
             recording_active: false,
