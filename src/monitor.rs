@@ -1,4 +1,4 @@
-use crate::types::{color, split_highlight, DisplayMode, LogLine, Segment};
+use crate::types::{split_highlight, DisplayMode, LogLine, LogRole, LogSegment};
 use encoding_rs::{Decoder, Encoding};
 use std::collections::VecDeque;
 
@@ -96,7 +96,7 @@ impl Monitor {
         }
     }
 
-    fn push(&mut self, segments: Vec<Segment>, text: String, stamp: String) {
+    fn push(&mut self, segments: Vec<LogSegment>, text: String, stamp: String) {
         if self.paused {
             return;
         }
@@ -130,9 +130,13 @@ impl Monitor {
             let keyword = self.highlight.clone();
             let mut segments = Vec::new();
             if !prefix.is_empty() {
-                segments.push(Segment::plain(prefix.clone(), color::MUTED));
+                segments.push(LogSegment {
+                    text: prefix.clone(),
+                    role: LogRole::Muted,
+                    bold: false,
+                });
             }
-            segments.extend(split_highlight(&self.pending, &keyword, color::TEXT));
+            segments.extend(split_highlight(&self.pending, &keyword, LogRole::Text));
             let text = format!("{}{}", prefix, self.pending);
             self.push(segments, text, stamp);
         } else {
@@ -151,7 +155,7 @@ impl Monitor {
         match self.mode {
             DisplayMode::Text => {
                 let mut decoded = String::new();
-                let _ = self.decoder.decode_to_string(data, &mut decoded, false);
+                crate::types::decode_into(&mut self.decoder, data, &mut decoded);
                 for ch in decoded.chars() {
                     if ch == '\r' {
                         self.cr_pending = true;
@@ -209,7 +213,7 @@ impl Monitor {
             format!("{:08X}  {}", offset, hex.trim_end())
         };
         let keyword = self.highlight.clone();
-        let segments = split_highlight(&text, &keyword, color::TEAL);
+        let segments = split_highlight(&text, &keyword, LogRole::Hex);
         self.push(segments, text, String::new());
     }
 
@@ -219,12 +223,12 @@ impl Monitor {
         }
         let prefix = format!("{}TX> ", self.stamp_prefix(stamp));
         let keyword = self.highlight.clone();
-        let mut segments = vec![Segment {
+        let mut segments = vec![LogSegment {
             text: prefix.clone(),
-            fg: color::BLUE,
+            role: LogRole::Tx,
             bold: true,
         }];
-        segments.extend(split_highlight(text, &keyword, color::BLUE));
+        segments.extend(split_highlight(text, &keyword, LogRole::Tx));
         self.push(segments, format!("{}{}", prefix, text), stamp.to_string());
     }
 
@@ -237,7 +241,7 @@ impl Monitor {
             .iter()
             .filter(|line| line.text.to_lowercase().contains(&needle))
             .map(|line| LogLine {
-                segments: split_highlight(&line.text, filter, color::TEXT),
+                segments: split_highlight(&line.text, filter, LogRole::Text),
                 text: line.text.clone(),
                 timestamp: line.timestamp.clone(),
             })
@@ -256,7 +260,36 @@ impl Monitor {
         self.dropped
     }
 
+    /// 按索引读取一行（0 为最早一行），供增量推送到前端。
+    pub fn line_at(&self, index: usize) -> Option<&LogLine> {
+        self.lines.get(index)
+    }
+
+    /// 清空后重新推送时，前端需要知道当前行数。
     pub fn line_count(&self) -> usize {
         self.lines.len()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn decode_probe() {
+        let mut dec = Encoding::for_label(b"utf-8").unwrap().new_decoder();
+        let mut s = String::new();
+        let r = dec.decode_to_string(b"abc\r\ndef\r\n", &mut s, false);
+        println!("PROBE r={:?} decoded={:?} n={}", r, s, s.len());
+        let mut m = Monitor::new();
+        m.feed_rx(b"abc\r\ndef\r\n", "t");
+        println!("PROBE lines={} pending={:?} cr={}", m.lines.len(), m.pending, m.cr_pending);
+    }
+
+    #[test]
+    fn crlf_lines_are_flushed() {
+        let mut m = Monitor::new();
+        m.feed_rx(b"a\r\nb\r\nc\r\n", "12:00");
+        assert_eq!(m.line_count(), 3, "lines: {:?}", m.visible_lines("").iter().map(|l| l.text.clone()).collect::<Vec<_>>());
     }
 }

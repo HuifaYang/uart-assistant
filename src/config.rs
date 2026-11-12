@@ -28,6 +28,12 @@ pub struct MonitorConfig {
     pub loop_interval_ms: i32,
     pub append_newline: bool,
     pub hex_send: bool,
+    #[serde(default = "default_log_size")]
+    pub log_font_size: f32,
+}
+
+fn default_log_size() -> f32 {
+    13.0
 }
 
 impl Default for MonitorConfig {
@@ -43,6 +49,7 @@ impl Default for MonitorConfig {
             loop_interval_ms: 1000,
             append_newline: true,
             hex_send: false,
+            log_font_size: default_log_size(),
         }
     }
 }
@@ -63,6 +70,13 @@ pub struct Config {
     pub window_width: f32,
     #[serde(default)]
     pub window_height: f32,
+    #[serde(default = "default_true")]
+    pub dark: bool,
+    #[serde(default)]
+    pub accent: i32,
+    /// 界面文字颜色（#RRGGBB）；留空表示跟随主题默认值。
+    #[serde(default)]
+    pub text_color: String,
 }
 
 fn default_true() -> bool {
@@ -82,6 +96,9 @@ impl Default for Config {
             auto_reconnect: true,
             window_width: 1120.0,
             window_height: 760.0,
+            dark: true,
+            accent: 0,
+            text_color: String::new(),
         }
     }
 }
@@ -97,7 +114,7 @@ impl Config {
     pub fn load() -> Self {
         let path = config_path();
         match fs::read_to_string(&path) {
-            Ok(text) => serde_json::from_str(&text).unwrap_or_default(),
+            Ok(text) => serde_json::from_str(text.trim_start_matches('\u{feff}')).unwrap_or_default(),
             Err(_) => Self::default(),
         }
     }

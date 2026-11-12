@@ -1,9 +1,14 @@
-use crate::types::{color, Segment};
+use crate::theme::{Rgb, TermPalette};
+use crate::types::Segment;
 use std::collections::VecDeque;
+
+/// Attr 只保存颜色"槽位"：0-15 为 ANSI，16 为默认前景，17+ 为 xterm-256 色。
+/// 具体 RGB 在渲染时按当前主题解析，因此切换主题后已有内容也会跟着变色。
+pub const DEFAULT_COLOR: u16 = 16;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Attr {
-    pub fg: color::Rgb,
+    pub color: u16,
     pub bold: bool,
     pub inverse: bool,
 }
@@ -11,7 +16,7 @@ pub struct Attr {
 impl Default for Attr {
     fn default() -> Self {
         Self {
-            fg: (0xd6, 0xdc, 0xe5),
+            color: DEFAULT_COLOR,
             bold: false,
             inverse: false,
         }
@@ -32,17 +37,6 @@ impl Cell {
         }
     }
 }
-
-const ANSI: [color::Rgb; 8] = [
-    (0x33, 0x3a, 0x45),
-    (0xe0, 0x6c, 0x75),
-    (0x98, 0xc3, 0x79),
-    (0xe5, 0xc0, 0x7b),
-    (0x61, 0xaf, 0xef),
-    (0xc6, 0x78, 0xdd),
-    (0x56, 0xb6, 0xc2),
-    (0xdc, 0xe3, 0xeb),
-];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ParseState {
@@ -136,11 +130,7 @@ impl TerminalEmulator {
             self.cursor_col = 0;
             self.line_feed();
         }
-        let mut attr = self.attr;
-        if attr.inverse {
-            attr.fg = (0x11, 0x15, 0x1b);
-            attr.inverse = false;
-        }
+        let attr = self.attr;
         if self.cursor_row < self.screen.len() && self.cursor_col < self.screen[self.cursor_row].len() {
             self.screen[self.cursor_row][self.cursor_col] = Cell { ch, attr };
         }
@@ -393,11 +383,11 @@ impl TerminalEmulator {
                 7 => self.attr.inverse = true,
                 22 => self.attr.bold = false,
                 27 => self.attr.inverse = false,
-                30..=37 => self.attr.fg = ANSI[(code - 30) as usize],
-                90..=97 => self.attr.fg = bright(ANSI[(code - 90) as usize]),
-                39 => self.attr.fg = Attr::default().fg,
+                30..=37 => self.attr.color = (code - 30) as u16,
+                90..=97 => self.attr.color = 8 + (code - 90) as u16,
+                39 => self.attr.color = DEFAULT_COLOR,
                 38 if i + 2 < self.params.len() && self.params[i + 1] == 5 => {
-                    self.attr.fg = xterm_color(self.params[i + 2] as u8);
+                    self.attr.color = 17 + (self.params[i + 2] as u16).min(255);
                     i += 2;
                 }
                 40..=47 | 100..=107 | 48 | 49 => {}
@@ -407,66 +397,78 @@ impl TerminalEmulator {
         }
     }
 
-    pub fn render_lines(&self) -> Vec<Vec<Segment>> {
+    pub fn render_lines(&self, show_cursor: bool, pal: &TermPalette) -> Vec<Vec<Segment>> {
         self.screen
             .iter()
-            .map(|row| {
+            .enumerate()
+            .map(|(row_index, row)| {
                 let mut segments: Vec<Segment> = Vec::new();
                 let mut current = String::new();
-                let mut current_attr: Option<Attr> = None;
-                for cell in row {
-                    if let Some(attr) = current_attr {
-                        if attr != cell.attr {
+                let mut style: Option<(Rgb, bool)> = None;
+                for (col, cell) in row.iter().enumerate() {
+                    let at_cursor = row_index == self.cursor_row && col == self.cursor_col;
+                    let ch = if at_cursor { '█' } else { cell.ch };
+                    let next = if at_cursor {
+                        (if show_cursor { pal.cursor } else { pal.cursor_dim }, true)
+                    } else {
+                        (
+                            resolve(cell.attr.color, cell.attr.inverse, pal),
+                            cell.attr.bold,
+                        )
+                    };
+                    match style {
+                        Some(existing) if existing != next => {
                             segments.push(Segment {
                                 text: std::mem::take(&mut current),
-                                fg: attr.fg,
-                                bold: attr.bold,
+                                fg: existing.0,
+                                bold: existing.1,
                             });
-                            current_attr = Some(cell.attr);
+                            style = Some(next);
                         }
-                    } else {
-                        current_attr = Some(cell.attr);
+                        None => style = Some(next),
+                        _ => {}
                     }
-                    current.push(cell.ch);
+                    current.push(ch);
                 }
-                if let Some(attr) = current_attr {
+                if let Some(done) = style {
                     segments.push(Segment {
                         text: current.trim_end_matches(' ').to_string(),
-                        fg: attr.fg,
-                        bold: attr.bold,
+                        fg: done.0,
+                        bold: done.1,
                     });
                 }
                 segments.retain(|s| !s.text.is_empty());
                 if segments.is_empty() {
-                    segments.push(Segment::plain("", Attr::default().fg));
+                    segments.push(Segment::plain("", pal.fg));
                 }
                 segments
             })
             .collect()
     }
-
-    pub fn scrollback_lines(&self) -> Vec<Vec<Segment>> {
-        self.scrollback
-            .iter()
-            .map(|row| {
-                let text: String = row.iter().map(|c| c.ch).collect();
-                vec![Segment::plain(text.trim_end().to_string(), Attr::default().fg)]
-            })
-            .collect()
+    pub fn seed_banner(&mut self) {
+        self.feed("UART Assistant serial terminal\r\n");
+        self.feed("\x1b[90m[disconnected]\x1b[0m\r\n");
+        self.feed("\x1b[1;32m>\x1b[0m ");
     }
 }
 
-fn bright(base: color::Rgb) -> color::Rgb {
-    (
-        base.0.saturating_add(0x28),
-        base.1.saturating_add(0x28),
-        base.2.saturating_add(0x28),
-    )
+/// 把颜色槽位解析为当前主题下的 RGB。
+fn resolve(color: u16, inverse: bool, pal: &TermPalette) -> Rgb {
+    if inverse {
+        return pal.bg;
+    }
+    if color == DEFAULT_COLOR {
+        return pal.fg;
+    }
+    if (color as usize) < 16 {
+        return pal.ansi[color as usize];
+    }
+    xterm_color((color - 17) as u8)
 }
 
-fn xterm_color(index: u8) -> color::Rgb {
+fn xterm_color(index: u8) -> Rgb {
     if index < 16 {
-        return ANSI[(index % 8) as usize];
+        return crate::theme::TERM_DARK.ansi[(index % 8) as usize];
     }
     if index < 232 {
         let v = index - 16;
@@ -484,4 +486,24 @@ fn xterm_color(index: u8) -> color::Rgb {
     }
     let gray = 8 + (index - 232) * 10;
     (gray, gray, gray)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn banner_and_cursor_render_in_both_phases() {
+        let mut terminal = TerminalEmulator::new(80, 24);
+        terminal.seed_banner();
+        for phase in [true, false] {
+            let lines = terminal.render_lines(phase, &crate::theme::TERM_DARK);
+            assert!(
+                lines
+                    .iter()
+                    .any(|segments| segments.iter().any(|s| s.text.contains('█'))),
+                "cursor block missing in phase {phase}"
+            );
+        }
+    }
 }

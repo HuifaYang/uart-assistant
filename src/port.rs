@@ -130,9 +130,12 @@ pub fn scan_devices() -> Vec<DeviceInfo> {
 
     if let Ok(ports) = available_ports() {
         for info in ports {
+            #[cfg(target_os = "linux")]
             let canonical = std::fs::canonicalize(&info.port_name)
                 .map(|p| p.to_string_lossy().into_owned())
                 .unwrap_or_else(|_| info.port_name.clone());
+            #[cfg(not(target_os = "linux"))]
+            let canonical = info.port_name.clone();
             if seen_targets.contains(&canonical) {
                 continue;
             }
@@ -191,4 +194,18 @@ pub fn stm32_sequence(port: &mut dyn SerialPort, bootloader: bool) -> Result<(),
         set_dtr(port, false)?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn device_scan_works_off_the_ui_thread() {
+        let devices = std::thread::spawn(super::scan_devices)
+            .join()
+            .expect("background scan panicked");
+        println!("found {} serial device(s)", devices.len());
+        for device in &devices {
+            println!("  {} | {}", device.path, device.label);
+        }
+    }
 }

@@ -8,6 +8,9 @@
 # Logs and temporary output
 *.log
 
+# Local packaged binary (CI publishes build artifacts)
+/dist/
+
 # Editor / OS
 .idea/
 .vscode/

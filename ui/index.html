@@ -1,0 +1,1106 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>UART Assistant</title>
+<style>
+  :root{
+    --canvas:#0B0D12; --sidebar:#0E1016; --surface:#151821; --surface2:#1B1F29;
+    --border:#232833; --border-strong:#313848;
+    --text:#E7EAF0; --secondary:#B7BECC; --muted:#8A93A3; --faint:#5F6878;
+    --accent:#7C6CFF; --accent-hover:#8F80FF; --accent-soft:#1D1B38; --accent-border:#3A3566;
+    --ok:#34D399; --warn:#FBBF24; --danger:#F87171;
+    --console:#0A0C10; --console-raised:#12151B; --console-border:#232833;
+    --console-text:#D7DBE2; --console-muted:#7C8592;
+    --log-text:#D5DAE2; --log-muted:#7E8796; --log-tx:#6EA8FF; --log-hex:#5FD0C5; --log-hl:#E3B341;
+    --mono:"Cascadia Mono", Consolas, "Microsoft YaHei UI", monospace;
+    --log-size:13px; --row-h:20px;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  html,body{height:100%;}
+  body{
+    background:var(--canvas); color:var(--text);
+    font-family:"Segoe UI","Microsoft YaHei UI","Microsoft YaHei",sans-serif;
+    font-size:12px; overflow:hidden; user-select:none;
+    display:flex; height:100vh;
+  }
+  button{font:inherit; color:inherit; background:none; border:none; cursor:pointer;}
+  input,textarea{font:inherit;}
+  .grow{flex:1;}
+  .hidden{display:none !important;}
+
+  /* ── 侧栏 ───────────────────────────── */
+  .sidebar{
+    width:216px; flex:0 0 216px; background:var(--sidebar);
+    border-right:1px solid var(--border); padding:14px;
+    display:flex; flex-direction:column; gap:8px;
+  }
+  .brand{display:flex; align-items:center; gap:10px; height:44px;}
+  .logo{width:30px; height:30px; border-radius:9px; background:var(--accent);
+        display:flex; align-items:center; justify-content:center;
+        color:#fff; font-size:14px; font-weight:700;}
+  .brand .name{font-size:13px; font-weight:500;}
+  .brand .sub{font-size:10.5px; color:var(--faint); margin-top:1px;}
+  .hdiv{height:1px; background:var(--border);}
+  .section{font-size:10.5px; color:var(--muted); height:18px; display:flex; align-items:center; font-weight:500;}
+  .tab-list{display:flex; flex-direction:column; gap:2px; overflow-y:auto; max-height:40vh;}
+  .tab{
+    height:36px; border-radius:8px; display:flex; align-items:center; gap:8px;
+    padding:0 8px 0 14px; font-size:13px; color:var(--secondary);
+    position:relative; cursor:pointer; flex:0 0 auto;
+  }
+  .tab:hover{background:var(--surface);}
+  .tab.active{background:var(--accent-soft); color:var(--accent);}
+  .tab::before{content:""; position:absolute; left:0; top:10px; width:3px; height:16px;
+               border-radius:2px; background:transparent;}
+  .tab.active::before{background:var(--accent);}
+  .tab .title{overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .tab .x{margin-left:auto; color:var(--faint); font-size:14px; padding:0 2px;}
+  .tab .x:hover{color:var(--danger);}
+  .tab input{width:100%; height:22px; background:var(--surface2); border:1px solid var(--accent-border);
+             border-radius:5px; color:var(--text); padding:0 6px; font-size:12.5px; outline:none;}
+  .side-row{display:flex; gap:6px;}
+  .side-row .ghost{flex:1;}
+
+  .ghost{
+    height:30px; border-radius:8px; border:1px solid var(--border);
+    background:var(--surface); color:var(--secondary);
+    font-size:13px; display:inline-flex; align-items:center; justify-content:center;
+    padding:0 12px; white-space:nowrap;
+  }
+  .ghost:hover{background:var(--surface2); border-color:var(--border-strong);}
+  .ghost.on{background:var(--accent-soft); border-color:var(--accent-border); color:var(--accent);}
+  .ghost:disabled{opacity:.45; cursor:default;}
+
+  .status-card{
+    height:64px; border-radius:9px; background:var(--surface);
+    border:1px solid var(--border); padding:10px; display:flex; flex-direction:column; gap:2px;
+  }
+  .status-row{display:flex; align-items:center; gap:7px;}
+  .dot{width:7px; height:7px; border-radius:3.5px; background:var(--faint); flex:0 0 7px;}
+  .dot.on{background:var(--ok);}
+  .status-row .label{font-size:12px; font-weight:500; color:var(--secondary);}
+  .status-row .counts{margin-left:auto; font-family:var(--mono); font-size:10.5px; color:var(--faint);}
+  .status-card .port{font-family:var(--mono); font-size:11px; color:var(--muted);
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+
+  /* ── 主区 ───────────────────────────── */
+  main{flex:1; display:flex; flex-direction:column; padding:12px 16px 10px; gap:10px; min-width:0;}
+
+  .connect-bar{display:flex; gap:8px; height:44px; align-items:center; flex:0 0 44px;}
+  .combo{
+    height:34px; border-radius:8px; background:var(--surface); border:1px solid var(--border);
+    display:flex; align-items:center; padding:0 12px; color:var(--text); font-size:13px;
+    gap:8px; white-space:nowrap; cursor:pointer;
+  }
+  .combo:hover{border-color:var(--border-strong);}
+  .combo .caret{margin-left:auto; color:var(--faint); font-size:10px;}
+  .combo.device{flex:1; min-width:220px; overflow:hidden;}
+  .combo.device .label{overflow:hidden; text-overflow:ellipsis;}
+  .combo.baud{width:104px; justify-content:space-between;}
+  .primary{
+    height:34px; min-width:88px; border-radius:9px; background:var(--accent); color:#fff;
+    font-size:14px; font-weight:500; display:inline-flex; align-items:center; justify-content:center;
+    padding:0 16px;
+  }
+  .primary:hover{background:var(--accent-hover);}
+  .primary.off{background:var(--surface2); color:var(--danger); border:1px solid var(--border-strong);}
+  .primary.off:hover{background:var(--surface);}
+  .primary:disabled{opacity:.5; cursor:default;}
+
+  .params{
+    display:flex; align-items:center; gap:10px; padding:8px 12px;
+    background:var(--surface); border:1px solid var(--border); border-radius:9px; flex:0 0 auto;
+  }
+  .params .field{display:flex; align-items:center; gap:6px; font-size:12px; color:var(--muted);}
+  .params .combo{height:28px; padding:0 8px; font-size:12px; min-width:74px;}
+
+  .display-bar{display:flex; gap:10px; align-items:center; height:34px; flex:0 0 34px;}
+  .seg{
+    display:flex; align-items:center; gap:2px; padding:3px;
+    background:var(--surface); border:1px solid var(--border); border-radius:9px; height:34px;
+  }
+  .seg > span{height:26px; display:flex; align-items:center; padding:0 10px; border-radius:6px;
+              font-size:12px; color:var(--muted); cursor:pointer; white-space:nowrap;}
+  .seg > span.on{background:var(--surface2); color:var(--text); font-weight:500;}
+  .seg .pill{margin-left:6px; height:30px; min-width:50px; padding:0 12px; border-radius:8px;
+             border:1px solid var(--border); background:var(--surface); color:var(--secondary); font-size:13px;
+             display:inline-flex; align-items:center; justify-content:center;}
+  .seg .pill.on{background:var(--accent-soft); border-color:var(--accent-border); color:var(--accent); font-weight:500;}
+  .seg .combo{margin-left:6px; height:30px; padding:0 10px; min-width:76px; justify-content:space-between;}
+  .search{
+    margin-left:auto; width:184px; height:34px; border-radius:8px;
+    background:var(--surface); border:1px solid var(--border); color:var(--text);
+    padding:0 12px; outline:none;
+  }
+  .search::placeholder{color:var(--faint);}
+  .search:focus{border-color:var(--accent-border);}
+
+  .console{
+    flex:1; min-height:0; background:var(--console);
+    border:1px solid var(--console-border); border-radius:10px;
+    display:flex; flex-direction:column; overflow:hidden;
+  }
+  .console-head{
+    height:38px; flex:0 0 38px; display:flex; align-items:center; gap:8px;
+    padding:0 8px 0 12px; border-bottom:1px solid var(--console-border);
+  }
+  .console-head .dot{background:var(--console-muted);}
+  .console-head .dot.on{background:var(--ok);}
+  .console-head b{font-size:12.5px; font-weight:500; color:var(--console-text);}
+  .meta{font-family:var(--mono); font-size:11px; color:var(--console-muted); white-space:nowrap;}
+  .vsep{width:1px; height:12px; background:var(--console-border); margin:0 4px;}
+  .rec{display:flex; align-items:center; gap:6px; color:var(--danger); font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:200px;}
+  .rec .rec-dot{width:6px; height:6px; border-radius:3px; background:var(--danger); animation:pulse 1.2s infinite;}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+  .cbtn{
+    height:26px; min-width:44px; padding:0 10px; border-radius:7px;
+    border:1px solid var(--console-border); color:var(--console-text); font-size:12px;
+    display:inline-flex; align-items:center; justify-content:center;
+  }
+  .cbtn:hover{background:var(--console-raised); border-color:var(--border-strong);}
+  .cbtn.wide{min-width:72px;}
+  .cbtn.on{background:var(--accent-soft); border-color:var(--accent-border); color:var(--accent);}
+
+  .log-scroll{flex:1; min-height:0; overflow-y:auto; overflow-x:hidden; position:relative;}
+  .log-inner{position:relative; min-height:100%;}
+  .log-rows{position:absolute; inset:0;}
+  .log-rows .row{
+    position:absolute; left:0; right:0; padding-left:8px;
+    height:var(--row-h); line-height:var(--row-h);
+    font-family:var(--mono); font-size:var(--log-size);
+    white-space:pre; overflow:hidden; color:var(--log-text);
+  }
+  .empty{
+    position:absolute; inset:0; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; gap:5px;
+  }
+  .empty .empty-title{font-size:14px; font-weight:500; color:var(--console-text);}
+  .empty .empty-sub{font-size:12px; color:var(--console-muted);}
+  .log-scroll::-webkit-scrollbar, .term-view::-webkit-scrollbar{width:10px; height:10px;}
+  .log-scroll::-webkit-scrollbar-thumb, .term-view::-webkit-scrollbar-thumb{background:#2b313d; border-radius:5px; border:2px solid transparent; background-clip:content-box;}
+  .log-scroll::-webkit-scrollbar-thumb:hover, .term-view::-webkit-scrollbar-thumb:hover{background:#3a4150; background-clip:content-box;}
+  .log-scroll::-webkit-scrollbar-track, .term-view::-webkit-scrollbar-track{background:transparent;}
+
+  .term-view{
+    flex:1; min-height:0; overflow:auto; padding:8px;
+    font-family:var(--mono); font-size:15px; line-height:21px;
+    color:var(--console-text); white-space:pre; outline:none;
+  }
+  .term-row{white-space:pre; min-height:21px;}
+
+  .send-bar{display:flex; gap:8px; height:40px; align-items:center; flex:0 0 40px;}
+  .send-input{
+    flex:1; height:34px; border-radius:8px; background:var(--surface);
+    border:1px solid var(--border); color:var(--text); padding:0 12px;
+    outline:none;
+  }
+  .send-input::placeholder{color:var(--faint);}
+  .send-input:focus{border-color:var(--accent-border);}
+  .pill{
+    height:30px; min-width:50px; padding:0 12px; border-radius:8px; border:1px solid var(--border);
+    background:var(--surface); color:var(--secondary); font-size:13px;
+    display:inline-flex; align-items:center; justify-content:center;
+  }
+  .pill:hover{background:var(--surface2);}
+  .pill.on{background:var(--accent-soft); border-color:var(--accent-border); color:var(--accent); font-weight:500;}
+
+  .more{
+    display:flex; align-items:center; gap:10px; padding:8px 12px; flex-wrap:wrap;
+    background:var(--surface); border:1px solid var(--border); border-radius:9px; flex:0 0 auto;
+  }
+  .more .label{font-size:11px; color:var(--muted);}
+  .more .ghost{height:26px; font-size:12px; padding:0 10px;}
+  .more .mini{
+    width:64px; height:28px; border-radius:6px; background:var(--surface2);
+    border:1px solid var(--border); color:var(--text); padding:0 8px; outline:none;
+  }
+  .more .mini:focus{border-color:var(--accent-border);}
+  .macro{height:26px; padding:0 10px; border-radius:7px; border:1px solid var(--border);
+         background:var(--surface2); color:var(--secondary); font-size:12px;}
+  .macro:hover{border-color:var(--accent-border); color:var(--accent);}
+
+  .tools{
+    height:34px; flex:0 0 34px; display:flex; align-items:center; gap:8px; padding:0 12px;
+    border:1px solid var(--border); border-radius:8px; background:var(--surface);
+    font-size:12px; color:var(--secondary); cursor:pointer;
+  }
+  .tools .arrow{color:var(--faint); font-size:10px;}
+  .tools .right{margin-left:auto; color:var(--faint); font-size:11px;}
+  .tools-panel{
+    display:flex; align-items:center; gap:10px; padding:8px 12px; flex-wrap:wrap;
+    background:var(--surface); border:1px solid var(--border); border-radius:9px; flex:0 0 auto;
+  }
+  .tools-panel .label{font-size:11px; color:var(--muted);}
+  .tools-panel .ghost{height:26px; font-size:12px;}
+  .progress{width:120px; height:5px; border-radius:3px; background:var(--surface2); overflow:hidden;}
+  .progress > i{display:block; height:100%; width:0; background:var(--accent); transition:width .12s linear;}
+  .statusline{height:18px; flex:0 0 18px; display:flex; gap:10px; align-items:center; font-size:11px; color:var(--faint);}
+  .statusline .right{margin-left:auto; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:50%;}
+
+  /* 终端模式下隐藏显示栏/发送栏/工具 */
+  main.term-mode .display-bar, main.term-mode .send-bar, main.term-mode .tools, main.term-mode .tools-panel, main.term-mode .more, main.term-mode .params{display:none;}
+
+  .menu{
+    position:fixed; z-index:50; display:none; min-width:160px; max-height:320px; overflow-y:auto;
+    background:var(--surface); border:1px solid var(--border-strong); border-radius:8px;
+    padding:4px; box-shadow:0 12px 32px rgba(0,0,0,.45);
+  }
+  .menu.open{display:block;}
+  .menu-item{
+    padding:7px 10px; border-radius:6px; font-size:12.5px; color:var(--text);
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; cursor:pointer;
+  }
+  .menu-item:hover{background:var(--surface2);}
+  .menu-item.sel{color:var(--accent);}
+  .toast{
+    position:fixed; left:50%; bottom:56px; transform:translateX(-50%) translateY(8px);
+    background:var(--surface2); border:1px solid var(--border-strong); color:var(--text);
+    padding:8px 14px; border-radius:8px; font-size:12px; opacity:0; pointer-events:none;
+    transition:opacity .18s ease, transform .18s ease; box-shadow:0 10px 30px rgba(0,0,0,.4);
+    z-index:80;
+  }
+  .toast.show{opacity:1; transform:translateX(-50%) translateY(0);}
+
+  /* 对话框 */
+  .overlay{
+    position:fixed; inset:0; background:rgba(0,0,0,.45); display:flex;
+    align-items:center; justify-content:center; z-index:60;
+  }
+  .dialog{
+    width:520px; background:var(--canvas); border:1px solid var(--border-strong);
+    border-radius:12px; box-shadow:0 24px 60px rgba(0,0,0,.55); padding:20px;
+    display:flex; flex-direction:column; gap:14px;
+  }
+  .dialog h2{font-size:17px; font-weight:500; color:var(--text);}
+  .dialog .hint{font-size:12px; color:var(--muted); line-height:1.6;}
+  .dialog .row{display:flex; align-items:center; gap:10px;}
+  .dialog .row .label{font-size:11px; font-weight:600; color:var(--muted); width:64px;}
+  .dialog textarea{
+    width:100%; height:220px; resize:none; background:var(--surface);
+    border:1px solid var(--border); border-radius:8px; color:var(--text);
+    padding:10px; font-family:var(--mono); font-size:13px; outline:none; user-select:text;
+  }
+  .dialog textarea:focus{border-color:var(--accent-border);}
+  .dialog .actions{display:flex; justify-content:flex-end; gap:8px;}
+  .swatches{display:flex; gap:8px;}
+  .swatch{width:28px; height:28px; border-radius:8px; border:2px solid transparent; cursor:pointer;}
+  .swatch.sel{border-color:var(--text);}
+  .color-input{
+    width:110px; height:30px; border-radius:7px; background:var(--surface);
+    border:1px solid var(--border); color:var(--text); padding:0 8px; font-family:var(--mono); font-size:12px; outline:none;
+  }
+  .color-input:focus{border-color:var(--accent-border);}
+</style>
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="logo">U</div>
+      <div>
+        <div class="name">UART Assistant</div>
+        <div class="sub">串口调试助手</div>
+      </div>
+    </div>
+    <div class="hdiv"></div>
+    <div class="section">会话</div>
+    <div class="tab-list" id="tabList"></div>
+    <div class="grow"></div>
+    <div class="side-row">
+      <button class="ghost" id="addMonitor">+ 监视器</button>
+      <button class="ghost" id="addTerminal">+ 终端</button>
+    </div>
+    <button class="ghost" id="settingsBtn" style="height:30px">设置</button>
+    <div class="status-card">
+      <div class="status-row">
+        <span class="dot" id="sideDot"></span>
+        <span class="label" id="sideState">未连接</span>
+        <span class="counts" id="sideCounts">RX 0 TX 0</span>
+      </div>
+      <div class="port" id="sidePort">未选择设备</div>
+    </div>
+  </aside>
+
+  <main id="main">
+    <div class="connect-bar">
+      <div class="combo device" id="deviceCombo"><span class="label" id="deviceLabel">未找到串口</span><span class="caret">▾</span></div>
+      <div class="combo baud" id="baudCombo"><span id="baudLabel">115200</span><span class="caret">▾</span></div>
+      <button class="ghost" id="rescanBtn">刷新</button>
+      <button class="ghost" id="paramsBtn">参数</button>
+      <button class="primary" id="connectBtn">连接</button>
+    </div>
+
+    <div class="params hidden" id="paramsPanel">
+      <div class="field"><span>数据位</span><div class="combo" id="dataBitsCombo"><span id="dataBitsLabel">8</span><span class="caret">▾</span></div></div>
+      <div class="field"><span>停止位</span><div class="combo" id="stopBitsCombo"><span id="stopBitsLabel">1</span><span class="caret">▾</span></div></div>
+      <div class="field"><span>校验</span><div class="combo" id="parityCombo"><span id="parityLabel">None</span><span class="caret">▾</span></div></div>
+      <div class="field"><span>流控</span><div class="combo" id="flowCombo"><span id="flowLabel">None</span><span class="caret">▾</span></div></div>
+      <span class="grow"></span>
+      <span class="meta" id="paramsHint">参数在下次连接时生效</span>
+    </div>
+
+    <div class="display-bar">
+      <div class="seg">
+        <span data-mode="0" class="on">普通</span>
+        <span data-mode="1">HEX</span>
+        <span data-mode="2">A+HEX</span>
+        <span class="pill" id="timestampsBtn">时间戳</span>
+        <span class="pill on" id="autoscrollBtn">滚屏</span>
+        <span class="pill" id="pausedBtn">暂停</span>
+        <div class="combo" id="encCombo"><span id="encLabel">UTF-8</span><span class="caret">▾</span></div>
+      </div>
+      <input class="search" id="searchInput" placeholder="搜索日志">
+    </div>
+
+    <div class="console">
+      <div class="console-head">
+        <span class="dot" id="headDot"></span>
+        <b id="consoleTitle">接收数据</b>
+        <span class="meta" id="rxLabel">RX 0</span>
+        <span class="meta" id="txLabel">TX 0</span>
+        <span class="vsep"></span>
+        <span class="meta" id="lineLabel">0 行</span>
+        <div class="rec hidden" id="recIndicator"><span class="rec-dot"></span><span id="recText">原始记录</span></div>
+        <span class="grow"></span>
+        <button class="cbtn" id="toolsBtn">工具</button>
+        <button class="cbtn" id="saveBtn">保存</button>
+        <button class="cbtn" id="clearBtn">清空</button>
+        <button class="cbtn wide" id="recordBtn">原始记录</button>
+      </div>
+      <div class="log-scroll" id="logScroll">
+        <div class="log-inner" id="logInner"><div class="log-rows" id="logRows"></div></div>
+        <div class="empty" id="emptyState">
+          <div class="empty-title">还没有数据</div>
+          <div class="empty-sub">选择设备并点击「连接」，串口数据会显示在这里</div>
+        </div>
+      </div>
+      <div class="term-view hidden" id="termView" tabindex="0"></div>
+    </div>
+
+    <div class="send-bar">
+      <input class="send-input" id="sendInput" placeholder="输入命令，回车发送">
+      <button class="pill" id="hexSendBtn">HEX</button>
+      <button class="pill on" id="newlineBtn">换行</button>
+      <button class="ghost" id="echoBtn">回显</button>
+      <button class="ghost" id="moreBtn">更多</button>
+      <button class="primary" id="sendBtn">发送</button>
+    </div>
+
+    <div class="more hidden" id="morePanel">
+      <span class="label">宏</span>
+      <div id="macroList" style="display:flex; gap:6px; flex-wrap:wrap;"></div>
+      <button class="ghost" id="editMacrosBtn">编辑</button>
+      <span class="vsep" style="background:var(--border)"></span>
+      <span class="label">高亮</span>
+      <input class="mini" id="highlightInput" placeholder="关键词">
+      <span class="vsep" style="background:var(--border)"></span>
+      <span class="label">行数上限</span>
+      <input class="mini" id="lineLimitInput" value="10000">
+      <span class="vsep" style="background:var(--border)"></span>
+      <span class="label">循环</span>
+      <input class="mini" id="loopInterval" value="1000">
+      <span class="label">ms</span>
+      <button class="pill" id="loopBtn">开启</button>
+    </div>
+
+    <div class="tools" id="toolsRow"><span class="arrow" id="toolsArrow">▸</span><span>设备工具</span><span class="right" id="toolsText">就绪</span></div>
+
+    <div class="tools-panel hidden" id="toolsPanel">
+      <span class="label">线路</span>
+      <button class="ghost" id="dtrBtn">DTR</button>
+      <button class="ghost" id="rtsBtn">RTS</button>
+      <span class="vsep" style="background:var(--border)"></span>
+      <span class="label">MCU</span>
+      <button class="ghost" id="resetBtn">复位</button>
+      <button class="ghost" id="bootBtn">Bootloader</button>
+      <span class="vsep" style="background:var(--border)"></span>
+      <span class="label">XModem</span>
+      <span class="meta" id="xmodemFile">未选择文件</span>
+      <button class="ghost" id="xmodemChoose">选择文件</button>
+      <button class="pill" id="use1kBtn">1K</button>
+      <button class="ghost" id="xmodemStart">发送</button>
+      <button class="ghost hidden" id="xmodemCancel">取消</button>
+      <div class="progress hidden" id="xmodemProgress"><i id="xmodemBar"></i></div>
+    </div>
+
+    <div class="statusline"><span id="statusLeft">未连接</span><span>|</span><span id="statusMid">0 行 · UTF-8</span><span class="right" id="statusRight">就绪</span></div>
+  </main>
+
+  <div class="menu" id="menu"></div>
+  <div class="toast" id="toast"></div>
+
+  <div class="overlay hidden" id="settingsOverlay">
+    <div class="dialog">
+      <h2>设置</h2>
+      <div class="row"><span class="label">主题</span>
+        <button class="pill" id="themeDark">深色</button>
+        <button class="pill" id="themeLight">浅色</button>
+      </div>
+      <div class="row"><span class="label">强调色</span>
+        <div class="swatches" id="swatches"></div>
+      </div>
+      <div class="row"><span class="label">连接</span>
+        <button class="pill" id="autoReconnectBtn">断线自动重连</button>
+      </div>
+      <div class="row"><span class="label">文字颜色</span>
+        <input class="color-input" id="textColorInput" placeholder="#E7EAF0">
+        <button class="ghost" id="textColorReset">默认</button>
+      </div>
+      <div class="hint">文字颜色留空表示跟随主题默认值；填写 #RRGGBB。</div>
+      <div class="actions">
+        <button class="ghost" id="settingsCancel">取消</button>
+        <button class="primary" id="settingsSave">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="overlay hidden" id="macroOverlay">
+    <div class="dialog">
+      <h2>编辑宏命令</h2>
+      <div class="hint">每行一条：名称 | 命令 | 1（可选，表示按 HEX 发送）。命令中的换行用 \r\n 表示。</div>
+      <textarea id="macroEditor" spellcheck="false"></textarea>
+      <div class="actions">
+        <button class="ghost" id="macroCancel">取消</button>
+        <button class="primary" id="macroSave">保存</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const PAD = 8;
+  const BAUDS = [9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600];
+  const PARITIES = ["None", "Odd", "Even"];
+  const FLOWS = ["None", "RTS/CTS", "XON/XOFF"];
+  const ROLE = ["var(--log-text)", "var(--log-muted)", "var(--log-tx)", "var(--log-hex)", "var(--log-hl)"];
+
+  const S = {
+    lines: [],
+    view: null,
+    search: "",
+    termRows: [],
+    tabs: [],
+    active: 0,
+    kind: 0,
+    cfg: { encodings: ["UTF-8"], encoding: 0, mode: 0 },
+    devices: [],
+    devIndex: -1,
+    status: {},
+    fontPx: 13,
+    rowH: 20,
+    follow: true,
+    autoScroll: true,
+    connected: false,
+    loopOn: false,
+    use1k: false,
+    editingTab: -1,
+    settingsDraft: { dark: true, accent: 0, textColor: "" },
+  };
+
+  function cmd(obj) {
+    if (window.ipc && window.ipc.postMessage) window.ipc.postMessage(JSON.stringify(obj));
+  }
+
+  window.__host = {
+    push(events) {
+      for (const ev of events) {
+        switch (ev.t) {
+          case "theme": applyTheme(ev.theme); break;
+          case "devices": S.devices = ev.list || []; S.devIndex = ev.index; renderDevice(); break;
+          case "tabs": S.tabs = ev.tabs || []; S.active = ev.active; renderTabs(); break;
+          case "session": applySession(ev); break;
+          case "status": applyStatus(ev); break;
+          case "log": applyLog(ev); break;
+          case "term": S.termRows = ev.rows || []; renderTerm(); break;
+          case "macros": $("macroEditor").value = ev.text || ""; break;
+        }
+      }
+    },
+  };
+
+  // ── 主题 ─────────────────────────────────────────────
+  function applyTheme(t) {
+    const root = document.documentElement.style;
+    const map = {
+      canvas: t.canvas, sidebar: t.sidebar, surface: t.surface, surface2: t.surface2,
+      border: t.border, "border-strong": t.borderStrong, text: t.text, secondary: t.secondary,
+      muted: t.muted, faint: t.faint, accent: t.accent, "accent-hover": t.accentHover,
+      "accent-soft": t.accentSoft, "accent-border": t.accentBorder, ok: t.ok, warn: t.warn,
+      danger: t.danger, console: t.console, "console-raised": t.consoleRaised,
+      "console-border": t.consoleBorder, "console-text": t.consoleText, "console-muted": t.consoleMuted,
+      "log-text": t.logText, "log-muted": t.logMuted, "log-tx": t.logTx, "log-hex": t.logHex, "log-hl": t.logHighlight,
+    };
+    for (const [k, v] of Object.entries(map)) if (v) root.setProperty("--" + k, v);
+    document.documentElement.style.colorScheme = t.dark ? "dark" : "light";
+    S.settingsDraft.dark = t.dark;
+  }
+
+  // ── 设备 ─────────────────────────────────────────────
+  function renderDevice() {
+    const dev = S.devices[S.devIndex];
+    const label = dev ? dev.label + (dev.detail ? " · " + dev.detail : "") : "未找到串口";
+    $("deviceLabel").textContent = label;
+    $("deviceCombo").title = dev ? dev.label + "  " + dev.detail : "";
+    $("sidePort").textContent = dev ? dev.path : (S.cfg.port || "未选择设备");
+  }
+
+  // ── 标签 ─────────────────────────────────────────────
+  function renderTabs() {
+    const list = $("tabList");
+    const frag = document.createDocumentFragment();
+    S.tabs.forEach((tab, i) => {
+      const el = document.createElement("div");
+      el.className = "tab" + (i === S.active ? " active" : "");
+      if (S.editingTab === i) {
+        const input = document.createElement("input");
+        input.value = tab.title;
+        input.addEventListener("click", (e) => e.stopPropagation());
+        input.addEventListener("keydown", (e) => {
+          if (e.key === "Enter") {
+            cmd({ cmd: "rename-session", index: i, title: input.value });
+            S.editingTab = -1;
+          } else if (e.key === "Escape") {
+            S.editingTab = -1;
+            renderTabs();
+          }
+        });
+        input.addEventListener("blur", () => { S.editingTab = -1; renderTabs(); });
+        el.appendChild(input);
+        frag.appendChild(el);
+        setTimeout(() => { input.focus(); input.select(); }, 0);
+        return;
+      }
+      const dot = document.createElement("span");
+      dot.className = "dot" + (tab.connected ? " on" : "");
+      const title = document.createElement("span");
+      title.className = "title";
+      title.textContent = tab.title;
+      const x = document.createElement("span");
+      x.className = "x";
+      x.textContent = "×";
+      x.title = "关闭";
+      x.addEventListener("click", (e) => { e.stopPropagation(); cmd({ cmd: "close-session", index: i }); });
+      el.append(dot, title, x);
+      el.addEventListener("click", () => cmd({ cmd: "select-session", index: i }));
+      el.addEventListener("dblclick", (e) => { e.preventDefault(); S.editingTab = i; renderTabs(); });
+      frag.appendChild(el);
+    });
+    list.replaceChildren(frag);
+  }
+
+  // ── 会话配置 ─────────────────────────────────────────
+  let macroNames = [];
+  function applySession(c) {
+    S.cfg = Object.assign(S.cfg, c);
+    S.kind = c.kind;
+    S.autoScroll = !!c.autoscroll;
+    S.loopOn = !!c.loop;
+    S.use1k = !!c.use1k;
+    $("main").classList.toggle("term-mode", c.kind === 1);
+    $("consoleTitle").textContent = c.kind === 1 ? "终端" : "接收数据";
+    $("toolsBtn").classList.toggle("hidden", c.kind === 1);
+    $("saveBtn").classList.toggle("hidden", c.kind === 1);
+    $("clearBtn").classList.toggle("hidden", c.kind === 1);
+    $("recordBtn").classList.toggle("hidden", c.kind === 1);
+    $("logScroll").classList.toggle("hidden", c.kind === 1);
+    $("termView").classList.toggle("hidden", c.kind !== 1);
+    if (c.kind === 1) setTimeout(() => $("termView").focus(), 0);
+
+    for (const el of document.querySelectorAll("[data-mode]")) {
+      el.classList.toggle("on", Number(el.dataset.mode) === c.mode);
+    }
+    $("encLabel").textContent = (c.encodings && c.encodings[c.encoding]) || "UTF-8";
+    $("timestampsBtn").classList.toggle("on", !!c.timestamps);
+    $("autoscrollBtn").classList.toggle("on", !!c.autoscroll);
+    $("pausedBtn").classList.toggle("on", !!c.paused);
+    $("hexSendBtn").classList.toggle("on", !!c.hexSend);
+    $("newlineBtn").classList.toggle("on", !!c.appendNewline);
+    $("echoBtn").classList.toggle("on", !!c.echoTx);
+    $("baudLabel").textContent = String(c.baud || 115200);
+    $("dataBitsLabel").textContent = String(c.dataBits || 8);
+    $("stopBitsLabel").textContent = String(c.stopBits || 1);
+    $("parityLabel").textContent = PARITIES[c.parity || 0];
+    $("flowLabel").textContent = FLOWS[c.flow || 0];
+    $("lineLimitInput").value = String(c.lineLimit || 10000);
+    $("highlightInput").value = c.highlight || "";
+    $("loopInterval").value = String(c.loopInterval || 1000);
+    $("xmodemFile").textContent = c.xmodemFile || "未选择文件";
+    $("use1kBtn").classList.toggle("on", !!c.use1k);
+    $("loopBtn").classList.toggle("on", !!c.loop);
+    $("loopBtn").textContent = c.loop ? "停止" : "开启";
+    S.fontPx = c.fontSize || S.fontPx;
+    setFont(S.fontPx, true);
+    macroNames = (c.macros || []).map((m) => m.name);
+    renderMacros(c.macros || []);
+    if (c.kind === 1) { renderTerm(); }
+  }
+
+  function renderMacros(macros) {
+    const box = $("macroList");
+    box.replaceChildren();
+    macros.forEach((m, i) => {
+      const b = document.createElement("button");
+      b.className = "macro";
+      b.textContent = m.name;
+      b.addEventListener("click", () => cmd({ cmd: "send-macro", index: i }));
+      box.appendChild(b);
+    });
+    if (!macros.length) {
+      const s = document.createElement("span");
+      s.className = "label";
+      s.textContent = "还没有宏，点「编辑」添加";
+      box.appendChild(s);
+    }
+  }
+
+  // ── 状态 ─────────────────────────────────────────────
+  function applyStatus(s) {
+    S.status = s;
+    S.connected = !!s.connected;
+    $("connectBtn").textContent = s.connected ? "断开" : "连接";
+    $("connectBtn").classList.toggle("off", s.connected);
+    $("headDot").classList.toggle("on", s.connected);
+    $("sideDot").classList.toggle("on", s.connected);
+    $("sideState").textContent = s.state;
+    $("sideState").style.color = s.connected ? "var(--ok)" : "var(--secondary)";
+    $("sideCounts").textContent = "RX " + s.rx + " TX " + s.tx;
+    $("rxLabel").textContent = "RX " + s.rx;
+    $("txLabel").textContent = "TX " + s.tx;
+    updateLineLabel();
+    $("statusLeft").textContent = s.state + (s.port ? " · " + s.port : "");
+    $("statusMid").textContent = s.lines + " 行 · " + $("encLabel").textContent;
+    $("statusRight").textContent = s.msg || "就绪";
+    $("recIndicator").classList.toggle("hidden", !s.recording);
+    $("recText").textContent = s.recordText || "原始记录";
+    $("recordBtn").textContent = s.recording ? "停止记录" : "原始记录";
+    $("recordBtn").classList.toggle("on", !!s.recording);
+    $("xmodemProgress").classList.toggle("hidden", !s.transfer);
+    $("xmodemCancel").classList.toggle("hidden", !s.transfer);
+    $("xmodemStart").classList.toggle("hidden", !!s.transfer);
+    if (s.transfer) {
+      $("xmodemBar").style.width = Math.round((s.progress || 0) * 100) + "%";
+      $("toolsText").textContent = s.transferText || "传输中";
+    } else {
+      $("toolsText").textContent = s.msg || "就绪";
+    }
+  }
+
+  // ── 日志 ─────────────────────────────────────────────
+  function applyLog(ev) {
+    if (ev.reset) { S.lines = []; S.view = null; S.total = 0; }
+    if (ev.drop > 0) {
+      S.lines.splice(0, ev.drop);
+      if (S.view) S.view = S.view.filter((i) => i >= ev.drop).map((i) => i - ev.drop);
+    }
+    if (ev.append && ev.append.length) {
+      const base = S.lines.length;
+      for (let i = 0; i < ev.append.length; i++) {
+        const line = ev.append[i];
+        S.lines.push(line);
+        if (S.search && lineText(line).toLowerCase().includes(S.search)) S.view.push(base + i);
+      }
+    }
+    if (typeof ev.total === "number") S.total = ev.total;
+    if (S.lines.length > S.total) S.lines.splice(0, S.lines.length - S.total);
+    updateHeight();
+    updateEmpty();
+    updateLineLabel();
+    if (S.autoScroll && S.follow) stickBottom();
+    renderRows();
+  }
+
+  function lineText(line) {
+    let out = "";
+    for (const seg of line) out += seg[0];
+    return out;
+  }
+  function rowCount() { return S.view ? S.view.length : S.lines.length; }
+  function lineOf(row) { return S.lines[S.view ? S.view[row] : row]; }
+  function updateLineLabel() {
+    const total = S.lines.length;
+    $("lineLabel").textContent = S.view ? (S.view.length + " / " + total + " 行") : (total + " 行");
+  }
+  function updateEmpty() {
+    const empty = $("emptyState");
+    if (rowCount() > 0) { empty.style.display = "none"; return; }
+    empty.style.display = "flex";
+    empty.querySelector(".empty-title").textContent = S.search ? "没有匹配的日志" : "还没有数据";
+    empty.querySelector(".empty-sub").textContent = S.search ? "换个关键词试试" : "选择设备并点击「连接」，串口数据会显示在这里";
+  }
+  function updateHeight() {
+    $("logInner").style.height = (rowCount() * S.rowH + PAD * 2) + "px";
+  }
+  function stickBottom() {
+    const sc = $("logScroll");
+    sc.scrollTop = sc.scrollHeight;
+  }
+  function rebuildSearch() {
+    if (S.search) {
+      const needle = S.search;
+      S.view = [];
+      for (let i = 0; i < S.lines.length; i++) {
+        if (lineText(S.lines[i]).toLowerCase().includes(needle)) S.view.push(i);
+      }
+    } else {
+      S.view = null;
+    }
+    updateHeight();
+    updateEmpty();
+    updateLineLabel();
+    if (S.autoScroll && S.follow) stickBottom();
+    renderRows();
+  }
+
+  let renderPending = false;
+  function scheduleRender() {
+    if (renderPending) return;
+    renderPending = true;
+    requestAnimationFrame(() => { renderPending = false; renderRows(); });
+  }
+
+  function addSpan(row, text, color, bold) {
+    if (!text) return;
+    const span = document.createElement("span");
+    span.textContent = text;
+    if (color) span.style.color = color;
+    if (bold) span.style.fontWeight = "700";
+    row.appendChild(span);
+  }
+
+  function addLineContent(row, line) {
+    const needle = S.search;
+    if (!needle) {
+      for (const seg of line) addSpan(row, seg[0], ROLE[seg[1]] || ROLE[0], seg[2]);
+      return;
+    }
+    for (const seg of line) {
+      const text = seg[0];
+      const color = ROLE[seg[1]] || ROLE[0];
+      const lower = text.toLowerCase();
+      let i = 0;
+      for (;;) {
+        const j = lower.indexOf(needle, i);
+        if (j < 0) { addSpan(row, text.slice(i), color, seg[2]); break; }
+        addSpan(row, text.slice(i, j), color, seg[2]);
+        addSpan(row, text.slice(j, j + needle.length), "var(--log-hl)", 1);
+        i = j + needle.length;
+      }
+    }
+  }
+
+  function renderRows() {
+    const sc = $("logScroll");
+    const h = S.rowH;
+    const rows = rowCount();
+    const top = sc.scrollTop;
+    const viewH = sc.clientHeight;
+    const first = Math.max(0, Math.floor(top / h) - 4);
+    const last = Math.min(rows, Math.ceil((top + viewH) / h) + 4);
+    const frag = document.createDocumentFragment();
+    for (let i = first; i < last; i++) {
+      const row = document.createElement("div");
+      row.className = "row";
+      row.style.top = (PAD + i * h) + "px";
+      addLineContent(row, lineOf(i));
+      frag.appendChild(row);
+    }
+    $("logRows").replaceChildren(frag);
+  }
+
+  function renderTerm() {
+    const box = $("termView");
+    if (S.kind !== 1) return;
+    const frag = document.createDocumentFragment();
+    for (const row of S.termRows) {
+      const div = document.createElement("div");
+      div.className = "term-row";
+      for (const seg of row) addSpan(div, seg[0], seg[1], seg[2]);
+      if (!row.length) div.textContent = " ";
+      frag.appendChild(div);
+    }
+    const atBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 4;
+    box.replaceChildren(frag);
+    if (atBottom) box.scrollTop = box.scrollHeight;
+  }
+
+  function setFont(px, quiet) {
+    const size = Math.max(9, Math.min(32, Math.round(px)));
+    const sc = $("logScroll");
+    const anchor = S.rowH > 0 ? sc.scrollTop / S.rowH : 0;
+    S.fontPx = size;
+    S.rowH = Math.max(14, Math.round(size * 1.54));
+    document.documentElement.style.setProperty("--log-size", size + "px");
+    document.documentElement.style.setProperty("--row-h", S.rowH + "px");
+    for (const row of document.querySelectorAll(".row")) row.style.height = S.rowH + "px";
+    updateHeight();
+    sc.scrollTop = anchor * S.rowH;
+    renderRows();
+    if (!quiet) toast("日志字号 " + size + " px");
+  }
+
+  // ── 滚动 / 缩放 ──────────────────────────────────────
+  $("logScroll").addEventListener("scroll", () => {
+    const sc = $("logScroll");
+    S.follow = sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 2;
+    scheduleRender();
+  });
+  $("logScroll").addEventListener("wheel", (e) => {
+    if (!e.ctrlKey) return;
+    e.preventDefault();
+    setFont(S.fontPx + (e.deltaY < 0 ? 1 : -1));
+    cmd({ cmd: "font", value: S.fontPx });
+  }, { passive: false });
+  window.addEventListener("resize", () => { updateHeight(); scheduleRender(); });
+
+  // ── 菜单 ─────────────────────────────────────────────
+  const menu = $("menu");
+  function closeMenu() { menu.classList.remove("open"); }
+  function openMenu(anchor, items, selected, onPick) {
+    menu.replaceChildren();
+    const r = anchor.getBoundingClientRect();
+    menu.style.left = Math.round(r.left) + "px";
+    menu.style.top = Math.round(r.bottom + 4) + "px";
+    menu.style.minWidth = Math.max(160, Math.round(r.width)) + "px";
+    for (const it of items) {
+      const d = document.createElement("div");
+      d.className = "menu-item" + (it.value === selected ? " sel" : "");
+      d.textContent = it.label;
+      d.addEventListener("click", () => { closeMenu(); onPick(it.value); });
+      menu.appendChild(d);
+    }
+    menu.classList.add("open");
+    const rect = menu.getBoundingClientRect();
+    if (rect.bottom > window.innerHeight - 8) menu.style.top = Math.round(r.top - rect.height - 4) + "px";
+  }
+  document.addEventListener("mousedown", (e) => { if (!menu.contains(e.target)) closeMenu(); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeMenu(); });
+
+  // ── 顶栏 ─────────────────────────────────────────────
+  $("deviceCombo").addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (!S.devices.length) { toast("没有找到串口设备"); return; }
+    openMenu($("deviceCombo"), S.devices.map((d, i) => ({ label: d.label + (d.detail ? " · " + d.detail : ""), value: i })), S.devIndex, (i) => cmd({ cmd: "device", index: i }));
+  });
+  $("baudCombo").addEventListener("click", (e) => {
+    e.stopPropagation();
+    openMenu($("baudCombo"), BAUDS.map((b) => ({ label: String(b), value: b })), Number($("baudLabel").textContent), (b) => cmd({ cmd: "baud", value: b }));
+  });
+  $("encCombo").addEventListener("click", (e) => {
+    e.stopPropagation();
+    openMenu($("encCombo"), (S.cfg.encodings || []).map((name, i) => ({ label: name, value: i })), S.cfg.encoding, (i) => cmd({ cmd: "encoding", value: i }));
+  });
+  $("rescanBtn").addEventListener("click", () => cmd({ cmd: "rescan" }));
+  $("connectBtn").addEventListener("click", () => cmd({ cmd: "connect" }));
+  $("paramsBtn").addEventListener("click", () => {
+    $("paramsPanel").classList.toggle("hidden");
+    $("paramsBtn").classList.toggle("on", !$("paramsPanel").classList.contains("hidden"));
+  });
+  $("paramsPanel").addEventListener("click", (e) => {
+    const open = (anchor, items, sel, cb) => {
+      e.stopPropagation();
+      openMenu(anchor, items, sel, cb);
+    };
+    const t = e.target.closest(".combo");
+    if (!t) return;
+    if (t.id === "dataBitsCombo") open(t, [5, 6, 7, 8].map((v) => ({ label: String(v), value: v })), Number($("dataBitsLabel").textContent), (v) => cmd({ cmd: "params", dataBits: v }));
+    if (t.id === "stopBitsCombo") open(t, [1, 2].map((v) => ({ label: String(v), value: v })), Number($("stopBitsLabel").textContent), (v) => cmd({ cmd: "params", stopBits: v }));
+    if (t.id === "parityCombo") open(t, PARITIES.map((p, i) => ({ label: p, value: i })), S.cfg.parity || 0, (v) => cmd({ cmd: "params", parity: v }));
+    if (t.id === "flowCombo") open(t, FLOWS.map((p, i) => ({ label: p, value: i })), S.cfg.flow || 0, (v) => cmd({ cmd: "params", flow: v }));
+  });
+
+  // ── 显示栏 ───────────────────────────────────────────
+  for (const el of document.querySelectorAll("[data-mode]")) {
+    el.addEventListener("click", () => cmd({ cmd: "mode", value: Number(el.dataset.mode) }));
+  }
+  $("timestampsBtn").addEventListener("click", (e) => { e.stopPropagation(); cmd({ cmd: "timestamps", value: !S.cfg.timestamps }); });
+  $("autoscrollBtn").addEventListener("click", (e) => {
+    e.stopPropagation();
+    const next = !S.autoScroll;
+    S.autoScroll = next;
+    $("autoscrollBtn").classList.toggle("on", next);
+    if (next) { S.follow = true; stickBottom(); }
+    cmd({ cmd: "autoscroll", value: next });
+  });
+  $("pausedBtn").addEventListener("click", (e) => { e.stopPropagation(); cmd({ cmd: "paused", value: !S.cfg.paused }); });
+  let searchTimer = 0;
+  $("searchInput").addEventListener("input", (e) => {
+    clearTimeout(searchTimer);
+    const v = e.target.value.trim().toLowerCase();
+    searchTimer = setTimeout(() => { S.search = v; rebuildSearch(); }, 160);
+  });
+
+  // ── 发送 ─────────────────────────────────────────────
+  function doSend() {
+    const input = $("sendInput");
+    const text = input.value;
+    if (!text.trim()) return;
+    cmd({ cmd: "send", text });
+    sendHistory.push(text);
+    while (sendHistory.length > 30) sendHistory.shift();
+    historyIndex = -1;
+    input.value = "";
+  }
+  $("sendBtn").addEventListener("click", doSend);
+  const sendHistory = [];
+  let historyIndex = -1;
+  $("sendInput").addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); doSend(); return; }
+    if (e.key === "ArrowUp" && sendHistory.length) {
+      e.preventDefault();
+      historyIndex = Math.min(historyIndex + 1, sendHistory.length - 1);
+      $("sendInput").value = sendHistory[sendHistory.length - 1 - historyIndex];
+    } else if (e.key === "ArrowDown" && historyIndex >= 0) {
+      e.preventDefault();
+      historyIndex -= 1;
+      $("sendInput").value = historyIndex >= 0 ? sendHistory[sendHistory.length - 1 - historyIndex] : "";
+    }
+  });
+  $("hexSendBtn").addEventListener("click", () => cmd({ cmd: "hex-send", value: !S.cfg.hexSend }));
+  $("newlineBtn").addEventListener("click", () => cmd({ cmd: "append-newline", value: !S.cfg.appendNewline }));
+  $("echoBtn").addEventListener("click", () => cmd({ cmd: "echo", value: !S.cfg.echoTx }));
+  $("moreBtn").addEventListener("click", () => {
+    $("morePanel").classList.toggle("hidden");
+    $("moreBtn").classList.toggle("on", !$("morePanel").classList.contains("hidden"));
+  });
+  $("highlightInput").addEventListener("change", (e) => cmd({ cmd: "highlight", value: e.target.value.trim() }));
+  $("lineLimitInput").addEventListener("change", (e) => {
+    const n = Number(e.target.value);
+    if (n >= 200) cmd({ cmd: "line-limit", value: n });
+  });
+  $("loopBtn").addEventListener("click", () => {
+    const enabled = !S.loopOn;
+    S.loopOn = enabled;
+    cmd({ cmd: "loop", enabled, interval: Number($("loopInterval").value) || 1000, text: $("sendInput").value });
+    $("loopBtn").classList.toggle("on", enabled);
+    $("loopBtn").textContent = enabled ? "停止" : "开启";
+  });
+
+  // ── 工具 ─────────────────────────────────────────────
+  $("toolsRow").addEventListener("click", () => {
+    $("toolsPanel").classList.toggle("hidden");
+    $("toolsArrow").textContent = $("toolsPanel").classList.contains("hidden") ? "▸" : "▾";
+  });
+  $("toolsBtn").addEventListener("click", () => {
+    $("toolsPanel").classList.toggle("hidden");
+    $("toolsArrow").textContent = $("toolsPanel").classList.contains("hidden") ? "▸" : "▾";
+  });
+  $("dtrBtn").addEventListener("click", (e) => {
+    e.stopPropagation();
+    const on = !$("dtrBtn").classList.contains("on");
+    $("dtrBtn").classList.toggle("on", on);
+    cmd({ cmd: "dtr", value: on });
+  });
+  $("rtsBtn").addEventListener("click", (e) => {
+    e.stopPropagation();
+    const on = !$("rtsBtn").classList.contains("on");
+    $("rtsBtn").classList.toggle("on", on);
+    cmd({ cmd: "rts", value: on });
+  });
+  $("resetBtn").addEventListener("click", () => cmd({ cmd: "stm32", mode: 0 }));
+  $("bootBtn").addEventListener("click", () => cmd({ cmd: "stm32", mode: 1 }));
+  $("xmodemChoose").addEventListener("click", () => cmd({ cmd: "xmodem-choose" }));
+  $("use1kBtn").addEventListener("click", () => { S.use1k = !S.use1k; $("use1kBtn").classList.toggle("on", S.use1k); cmd({ cmd: "use-1k", value: S.use1k }); });
+  $("xmodemStart").addEventListener("click", () => cmd({ cmd: "xmodem-start" }));
+  $("xmodemCancel").addEventListener("click", () => cmd({ cmd: "xmodem-cancel" }));
+
+  // ── 会话管理 ─────────────────────────────────────────
+  $("addMonitor").addEventListener("click", () => cmd({ cmd: "new-session", kind: 0 }));
+  $("addTerminal").addEventListener("click", () => cmd({ cmd: "new-session", kind: 1 }));
+  $("saveBtn").addEventListener("click", () => cmd({ cmd: "save-log" }));
+  $("clearBtn").addEventListener("click", () => cmd({ cmd: "clear" }));
+  $("recordBtn").addEventListener("click", () => cmd({ cmd: "toggle-record" }));
+  $("editMacrosBtn").addEventListener("click", () => { cmd({ cmd: "macros-get" }); $("macroOverlay").classList.remove("hidden"); });
+  $("macroCancel").addEventListener("click", () => $("macroOverlay").classList.add("hidden"));
+  $("macroSave").addEventListener("click", () => {
+    cmd({ cmd: "macros-save", text: $("macroEditor").value });
+    $("macroOverlay").classList.add("hidden");
+  });
+
+  // ── 终端按键 ─────────────────────────────────────────
+  $("termView").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); cmd({ cmd: "terminal-key", text: "", enter: true }); return; }
+    if (e.key === "Backspace") {
+      e.preventDefault();
+      cmd({ cmd: "terminal-key", text: "\u0008", enter: false });
+      return;
+    }
+    if (e.ctrlKey || e.altKey) return;
+    if (e.key.length === 1) {
+      e.preventDefault();
+      cmd({ cmd: "terminal-key", text: e.key, enter: false });
+    }
+  });
+
+  // ── 设置 ─────────────────────────────────────────────
+  const ACCENTS = ["#7C6CFF", "#4C8DFF", "#2DD4BF", "#F5B544"];
+  function renderSwatches() {
+    const box = $("swatches");
+    box.replaceChildren();
+    ACCENTS.forEach((c, i) => {
+      const d = document.createElement("div");
+      d.className = "swatch" + (i === S.settingsDraft.accent ? " sel" : "");
+      d.style.background = c;
+      d.addEventListener("click", () => {
+        S.settingsDraft.accent = i;
+        renderSwatches();
+        previewSettings();
+      });
+      box.appendChild(d);
+    });
+  }
+  function previewSettings() {
+    cmd({ cmd: "settings-preview", dark: S.settingsDraft.dark, accent: S.settingsDraft.accent, textColor: $("textColorInput").value.trim() });
+  }
+  $("settingsBtn").addEventListener("click", () => {
+    S.settingsDraft = { dark: S.cfg.dark !== false, accent: S.cfg.accent || 0, textColor: S.cfg.textColor || "" };
+    $("textColorInput").value = S.settingsDraft.textColor;
+    renderSwatches();
+    $("autoReconnectBtn").classList.toggle("on", S.cfg.autoReconnect !== false);
+    $("themeDark").classList.toggle("on", S.settingsDraft.dark);
+    $("themeLight").classList.toggle("on", !S.settingsDraft.dark);
+    $("settingsOverlay").classList.remove("hidden");
+  });
+  $("themeDark").addEventListener("click", () => {
+    S.settingsDraft.dark = true;
+    $("themeDark").classList.add("on"); $("themeLight").classList.remove("on");
+    previewSettings();
+  });
+  $("themeLight").addEventListener("click", () => {
+    S.settingsDraft.dark = false;
+    $("themeLight").classList.add("on"); $("themeDark").classList.remove("on");
+    previewSettings();
+  });
+  $("autoReconnectBtn").addEventListener("click", () => {
+    const next = !$("autoReconnectBtn").classList.contains("on");
+    $("autoReconnectBtn").classList.toggle("on", next);
+    cmd({ cmd: "auto-reconnect", value: next });
+  });
+  $("textColorInput").addEventListener("change", previewSettings);
+  $("textColorReset").addEventListener("click", () => { $("textColorInput").value = ""; previewSettings(); });
+  $("settingsCancel").addEventListener("click", () => {
+    $("settingsOverlay").classList.add("hidden");
+    cmd({ cmd: "settings-preview", dark: S.cfg.dark, accent: S.cfg.accent || 0, textColor: S.cfg.textColor || "" });
+  });
+  $("settingsSave").addEventListener("click", () => {
+    cmd({ cmd: "settings-save", dark: S.settingsDraft.dark, accent: S.settingsDraft.accent, textColor: $("textColorInput").value.trim() });
+    $("settingsOverlay").classList.add("hidden");
+  });
+
+  // ── toast ────────────────────────────────────────────
+  let toastTimer = 0;
+  function toast(text) {
+    const el = $("toast");
+    el.textContent = text;
+    el.classList.add("show");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => el.classList.remove("show"), 1600);
+  }
+
+  // ── 启动 ─────────────────────────────────────────────
+  window.addEventListener("DOMContentLoaded", () => cmd({ cmd: "init" }));
+  if (document.readyState !== "loading") cmd({ cmd: "init" });
+})();
+</script>
+</body>
+</html>

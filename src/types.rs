@@ -1,19 +1,18 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-pub mod color {
-    pub type Rgb = (u8, u8, u8);
-    pub const TEXT: Rgb = (0x1f, 0x23, 0x28);
-    pub const MUTED: Rgb = (0x6b, 0x72, 0x80);
-    pub const BLUE: Rgb = (0x25, 0x63, 0xeb);
-    pub const TEAL: Rgb = (0x0f, 0x76, 0x6e);
-    pub const AMBER: Rgb = (0xb4, 0x53, 0x09);
-    pub const RED: Rgb = (0xc0, 0x39, 0x2b);
-    pub const GREEN: Rgb = (0x00, 0x87, 0x5a);
-    pub const WHITE: Rgb = (0xf8, 0xf9, 0xfb);
-    pub const GRAY: Rgb = (0x9c, 0xa3, 0xaf);
+/// 把一段字节解码进 `out`。
+///
+/// `encoding_rs` 的 `decode_to_string` 不会为输出扩容：目标 String 容量不足时
+/// 直接返回 `OutputFull` 且不写入任何内容。这里预留足够容量，避免静默丢数据。
+pub fn decode_into(decoder: &mut encoding_rs::Decoder, bytes: &[u8], out: &mut String) {
+    out.reserve(bytes.len().saturating_mul(4).saturating_add(16));
+    let _ = decoder.decode_to_string(bytes, out, false);
 }
 
+pub mod color {
+    pub type Rgb = (u8, u8, u8);
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum Parity {
     #[default]
@@ -142,29 +141,41 @@ impl Segment {
     }
 }
 
+/// 日志文本的语义角色：具体颜色在渲染时按当前主题解析。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LogRole {
+    Text,
+    Muted,
+    Tx,
+    Hex,
+    Highlight,
+}
+
+#[derive(Clone, Debug)]
+pub struct LogSegment {
+    pub text: String,
+    pub role: LogRole,
+    pub bold: bool,
+}
+
 #[derive(Clone, Debug)]
 pub struct LogLine {
-    pub segments: Vec<Segment>,
+    pub segments: Vec<LogSegment>,
     pub text: String,
     pub timestamp: String,
 }
 
-impl LogLine {
-    pub fn new(text: String, timestamp: String, fg: color::Rgb, keyword: &str) -> Self {
-        Self {
-            segments: split_highlight(&text, keyword, fg),
-            text,
-            timestamp,
-        }
-    }
-}
-
-pub fn split_highlight(text: &str, keyword: &str, fg: color::Rgb) -> Vec<Segment> {
+pub fn split_highlight(text: &str, keyword: &str, role: LogRole) -> Vec<LogSegment> {
+    let plain = |s: &str| LogSegment {
+        text: s.to_string(),
+        role,
+        bold: false,
+    };
     if text.is_empty() {
-        return vec![Segment::plain("", fg)];
+        return vec![plain("")];
     }
     if keyword.is_empty() {
-        return vec![Segment::plain(text.to_string(), fg)];
+        return vec![plain(text)];
     }
     let needle = keyword.to_lowercase();
     let haystack = text.to_lowercase();
@@ -179,20 +190,20 @@ pub fn split_highlight(text: &str, keyword: &str, fg: color::Rgb) -> Vec<Segment
             break;
         }
         if start > cursor {
-            out.push(Segment::plain(text[cursor..start].to_string(), fg));
+            out.push(plain(&text[cursor..start]));
         }
-        out.push(Segment {
+        out.push(LogSegment {
             text: text[start..start + needle.len()].to_string(),
-            fg: color::AMBER,
+            role: LogRole::Highlight,
             bold: true,
         });
         cursor = start + needle.len();
     }
     if cursor < text.len() {
-        out.push(Segment::plain(text[cursor..].to_string(), fg));
+        out.push(plain(&text[cursor..]));
     }
     if out.is_empty() {
-        out.push(Segment::plain(text.to_string(), fg));
+        out.push(plain(text));
     }
     out
 }
@@ -225,6 +236,12 @@ impl DisplayMode {
 pub enum Stm32Action {
     Reset,
     Bootloader,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SessionKind {
+    Monitor,
+    Terminal,
 }
 
 #[derive(Clone, Debug)]

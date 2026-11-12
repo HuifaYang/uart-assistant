@@ -1,22 +1,23 @@
 [package]
 name = "uart-assistant"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
-description = "Lightweight cross-platform serial debug assistant"
+description = "Lightweight UART debug assistant with a WebView2 UI"
 license = "MIT"
 
 [dependencies]
-chrono = "0.4.45"
-dirs = "7.0.0"
-encoding_rs = "0.8.44"
-rfd = "0.18.0"
-serde = { version = "1.0.229", features = ["derive"] }
-serde_json = "1.0.154"
-serialport = "4.10.1"
-slint = "1"
+chrono = "0.4"
+dirs = "7"
+encoding_rs = "0.8"
+rfd = "0.18"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serialport = "4"
+tao = "0.37"
+wry = "0.57"
 
-[build-dependencies]
-slint-build = "1"
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1"
 
 [profile.release]
 opt-level = "z"
